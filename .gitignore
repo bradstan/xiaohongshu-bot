@@ -1,0 +1,19 @@
+# 敏感文件 / 登录态
+*.cookies
+cookies.json
+published.json
+
+# 日志
+*.log
+
+# 封面图缓存
+covers/
+
+# 二进制 / MCP server
+xiaohongshu-mcp-darwin-arm64
+xiaohongshu-login-darwin-arm64
+*.tar.gz
+
+# Python 缓存
+__pycache__/
+*.pyc
