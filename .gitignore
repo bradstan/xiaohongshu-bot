@@ -17,3 +17,7 @@ xiaohongshu-login-darwin-arm64
 # Python 缓存
 __pycache__/
 *.pyc
+
+# 系统 / 运行时
+.DS_Store
+mcp.pid
