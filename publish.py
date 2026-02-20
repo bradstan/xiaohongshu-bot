@@ -13,6 +13,7 @@ import sys
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import urllib.request
 import urllib.error
@@ -163,7 +164,7 @@ def get_pending_articles(state: dict) -> list[Path]:
 
 
 # ─── MCP 调用 ─────────────────────────────────────────────────────────────────
-_session_id: str | None = None
+_session_id: Optional[str] = None
 
 
 def get_session() -> str:
