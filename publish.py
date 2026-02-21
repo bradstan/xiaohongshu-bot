@@ -24,7 +24,7 @@ from make_cover import generate_cover
 from mark_published import mark_file
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-VAULT_DIR  = Path("/Users/jarvis/Documents/Obsidian Vault/待发布")
+VAULT_DIR  = Path("/Users/jarvis/Documents/小红书/待发布")
 STATE_FILE = Path("/Users/jarvis/xiaohongshu-mcp/published.json")
 LOG_FILE   = Path("/Users/jarvis/xiaohongshu-mcp/publish.log")
 MCP_URL    = "http://localhost:18060/mcp"
@@ -355,7 +355,7 @@ def main() -> None:
         save_state(state)
 
         # 移动文件到「已发布」文件夹
-        published_dir = Path("/Users/jarvis/Documents/Obsidian Vault/已发布")
+        published_dir = Path("/Users/jarvis/Documents/小红书/已发布")
         published_dir.mkdir(parents=True, exist_ok=True)
         dest = published_dir / target.name
         target.rename(dest)
