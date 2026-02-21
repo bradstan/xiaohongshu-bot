@@ -137,26 +137,30 @@ def fetch_stats(feed_id: str, xsec_token: str) -> Optional[dict]:
             log.warning("get_feed_detail 错误: %s", result["error"])
             return None
 
-        # 解析响应文本
-        text = ""
-        inner = result.get("result", {}).get("content", [])
-        if inner:
-            text = inner[0].get("text", "")
-
-        # 尝试解析为 JSON
-        try:
-            data = json.loads(text)
-        except Exception:
-            # 如果文本包含数字，尝试正则提取
-            data = {}
-
-        # 从多种可能的结构中提取互动数据
+        # 新版 MCP 直接返回结构化 JSON，路径：result["data"]["note"]["interactInfo"]
         interact = (
-            data.get("interactInfo") or
-            data.get("noteCard", {}).get("interactInfo") or
-            data.get("note", {}).get("interactInfo") or
+            result.get("data", {}).get("note", {}).get("interactInfo") or
+            result.get("data", {}).get("interactInfo") or
             {}
         )
+
+        # 兜底：尝试从旧版文本格式解析
+        if not interact:
+            text = ""
+            inner = result.get("result", {}).get("content", [])
+            if inner:
+                text = inner[0].get("text", "")
+            try:
+                data = json.loads(text)
+            except Exception:
+                data = {}
+            interact = (
+                data.get("interactInfo") or
+                data.get("noteCard", {}).get("interactInfo") or
+                data.get("note", {}).get("interactInfo") or
+                data.get("data", {}).get("note", {}).get("interactInfo") or
+                {}
+            )
 
         # 有时 likedCount 是字符串数字
         def to_int(val) -> int:
