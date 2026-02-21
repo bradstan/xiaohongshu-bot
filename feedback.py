@@ -13,6 +13,7 @@ import sys
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 import urllib.request
 import urllib.error
@@ -71,7 +72,7 @@ def save_state(state: dict) -> None:
 
 
 # ─── MCP 调用 ─────────────────────────────────────────────────────────────────
-_session_id: str | None = None
+_session_id: Optional[str] = None
 
 
 def get_session() -> str:
@@ -125,7 +126,7 @@ def check_mcp_alive() -> bool:
 
 
 # ─── 互动数据拉取 ─────────────────────────────────────────────────────────────
-def fetch_stats(feed_id: str, xsec_token: str) -> dict | None:
+def fetch_stats(feed_id: str, xsec_token: str) -> Optional[dict]:
     """调用 get_feed_detail，返回互动数据 dict 或 None"""
     try:
         result = call_tool("get_feed_detail", {

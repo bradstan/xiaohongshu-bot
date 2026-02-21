@@ -225,21 +225,17 @@ def find_feed_id(title: str) -> tuple[str, str]:
     返回 (feed_id, xsec_token)，失败返回 ("", "")
     """
     try:
-        result = call_tool("search_feeds", {
-            "keyword": title,
-            "filters": {"search_scope": "已关注"}  # 搜自己发的
-        })
+        # 不限范围搜索，标题匹配 + userId 过滤自己的帖子
+        result = call_tool("search_feeds", {"keyword": title})
         text = ""
         if "result" in result:
             inner = result["result"].get("content", [])
             if inner:
                 text = inner[0].get("text", "")
 
-        # 解析 JSON（search_feeds 返回 JSON 字符串）
         try:
             feeds_data = json.loads(text)
         except Exception:
-            # 有时候直接是 dict
             feeds_data = result.get("result", {})
 
         feeds = []
@@ -248,17 +244,28 @@ def find_feed_id(title: str) -> tuple[str, str]:
         elif isinstance(feeds_data, list):
             feeds = feeds_data
 
-        # 找最匹配标题的一条
         clean_title = re.sub(r'\s+', '', title)
+        # 第一轮：标题完全匹配 + 是自己发的（userId 一致）
         for feed in feeds:
             note_card = feed.get("noteCard", {})
-            display_title = note_card.get("displayTitle", "")
-            if clean_title in re.sub(r'\s+', '', display_title) or \
-               re.sub(r'\s+', '', display_title) in clean_title:
+            display_title = re.sub(r'\s+', '', note_card.get("displayTitle", ""))
+            user_id = note_card.get("user", {}).get("userId", "")
+            if display_title == clean_title and user_id:
                 feed_id = feed.get("id", "")
                 xsec_token = feed.get("xsecToken", "")
                 if feed_id:
-                    log.info("找到 feed_id: %s", feed_id)
+                    log.info("找到 feed_id: %s (userId=%s)", feed_id, user_id)
+                    return feed_id, xsec_token
+
+        # 第二轮：标题包含匹配（兜底）
+        for feed in feeds:
+            note_card = feed.get("noteCard", {})
+            display_title = re.sub(r'\s+', '', note_card.get("displayTitle", ""))
+            if clean_title in display_title or display_title in clean_title:
+                feed_id = feed.get("id", "")
+                xsec_token = feed.get("xsecToken", "")
+                if feed_id:
+                    log.info("找到 feed_id（模糊匹配）: %s", feed_id)
                     return feed_id, xsec_token
 
         log.warning("未找到匹配的 feed，标题: %s", title)
