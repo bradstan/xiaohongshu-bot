@@ -49,8 +49,7 @@ def _draw_gradient(img: Image.Image, top: tuple, bottom: tuple) -> None:
 
 def _wrap_text(draw: ImageDraw.Draw, text: str, font, fill, x: int, y: int,
                max_w: int, line_gap: int = 10) -> int:
-    """自动换行绘制文字，返回最终 y 坐标"""
-    # 每行字数估算（中文约等宽）
+    """自动换行绘制文字，返回最终 y 坐标（基于实际行高）"""
     char_w = font.size
     chars_per = max(1, (max_w) // char_w)
     lines = []
@@ -63,7 +62,13 @@ def _wrap_text(draw: ImageDraw.Draw, text: str, font, fill, x: int, y: int,
             lines.extend(textwrap.wrap(para, width=chars_per))
     for line in lines:
         draw.text((x, y), line, font=font, fill=fill)
-        y += font.size + line_gap
+        # 用 getbbox 取实际行高，更准确
+        try:
+            bbox = font.getbbox(line)
+            line_h = bbox[3] - bbox[1]
+        except Exception:
+            line_h = font.size
+        y += line_h + line_gap
     return y
 
 
@@ -78,7 +83,7 @@ def extract_key_points(content: str, max_points: int = 3) -> list[str]:
 
     def is_valid(s: str) -> bool:
         s = s.strip()
-        if len(s) < 5 or len(s) > 20:
+        if len(s) < 5 or len(s) > 14:
             return False
         if re.match(r'^[\d\s\-=→+]+$', s):  # 纯数字/符号
             return False
@@ -88,39 +93,42 @@ def extract_key_points(content: str, max_points: int = 3) -> list[str]:
             return False
         return True
 
-    # 1. 优先取 ✅/✦/•/→ 开头的行（小红书常见要点格式）
-    icon_matches = re.findall(
-        r'^[✅✦•▶►→·]\s*(.{5,20})$', content, re.MULTILINE
-    )
-    for m in icon_matches:
-        m = re.sub(r'\*+', '', m).strip().rstrip('：:。')
+    def clean(s: str) -> str:
+        """去掉粗体标记、首尾冒号、空格"""
+        s = re.sub(r'\*+', '', s)
+        s = s.strip().lstrip('：:·・').rstrip('：:。')
+        return s
+
+    # 1. 优先取 ## / ### 标题（去掉 emoji 和纯序号前缀）
+    h_matches = re.findall(r'^(#{2,3})\s+(.+)$', content, re.MULTILINE)
+    for hashes, m in h_matches:
+        m = re.sub(r'^[❌✅⚠️💡🔥⚡️]+\s*', '', m)
+        m = re.sub(r'^\d+[\.、]\s*', '', m)
+        # ### 三级标题如有冒号，只取冒号后面部分（去掉「情况一：」这类前缀）
+        if len(hashes) == 3 and '：' in m:
+            m = m.split('：', 1)[1]
+        m = clean(m)
         if is_valid(m):
             points.append(m)
         if len(points) >= max_points:
             return points
 
-    # 2. 取 **粗体** 内容（去掉纯数字/公式类）
-    bold_matches = re.findall(r'\*\*([^*]{5,20})\*\*', content)
+    # 2. 取 **粗体**，排除「表现」「为什么」「正确做法」这类标签词
+    LABEL_WORDS = re.compile(r'^(表现|为什么|正确做法|建议|注意|结果|操作|当前)')
+    bold_matches = re.findall(r'\*\*([^*]+)\*\*', content)
     for m in bold_matches:
-        m = m.strip().rstrip('：:。')
+        m = clean(m)
+        if LABEL_WORDS.match(m):
+            continue
         if is_valid(m):
             points.append(m)
         if len(points) >= max_points:
             return points
 
-    # 3. 取 ### 三级标题（通常是操作步骤）
-    h3_matches = re.findall(r'^###\s+(.{4,18})$', content, re.MULTILINE)
-    for m in h3_matches:
-        m = re.sub(r'^[❌✅\d\.、\s]+', '', m).strip().rstrip('：:')
-        if is_valid(m):
-            points.append(m)
-        if len(points) >= max_points:
-            return points
-
-    # 4. 兜底：取数字列表项
-    num_matches = re.findall(r'^\d+[.、]\s+(.{5,18})$', content, re.MULTILINE)
+    # 3. 兜底：取数字列表项
+    num_matches = re.findall(r'^\d+[.、]\s+(.+)$', content, re.MULTILINE)
     for m in num_matches:
-        m = m.strip().rstrip('：:。')
+        m = clean(m)
         if is_valid(m):
             points.append(m)
         if len(points) >= max_points:
@@ -166,7 +174,7 @@ def generate_cover(title: str, content: str = "", index: int = 0) -> str:
     title_font = _font(FONT_BOLD, title_font_size)
     title_y = _wrap_text(draw, clean_title, title_font, text_c,
                           72, 450, W - 144, line_gap=16)
-    title_y += 50
+    title_y += 80
 
     # ── 分隔点 ───────────────────────────────────────────
     for i in range(3):
@@ -182,10 +190,13 @@ def generate_cover(title: str, content: str = "", index: int = 0) -> str:
     if points:
         pt_font = _font(FONT_LIGHT, 64)
         for pt in points:
-            # ✦ 符号 + 要点文字
             pt_text = f">> {pt}"
-            _wrap_text(draw, pt_text, pt_font, text_c, 72, title_y, W - 144, line_gap=10)
-            title_y += pt_font.size + 28
+            draw.text((72, title_y), pt_text, font=pt_font, fill=text_c)
+            try:
+                line_h = pt_font.getbbox(pt_text)[3] - pt_font.getbbox(pt_text)[1]
+            except Exception:
+                line_h = pt_font.size
+            title_y += line_h + 36
     else:
         # 没提取到要点时，显示副标题占位
         sub_font = _font(FONT_LIGHT, 68)
