@@ -31,15 +31,16 @@ MCP_URL    = "http://localhost:18060/mcp"
 MCP_ACCEPT = "application/json, text/event-stream"
 
 # ─── 日志 ────────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)s  %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-log = logging.getLogger(__name__)
+log = logging.getLogger("publish")
+log.setLevel(logging.INFO)
+if not log.handlers:
+    _fmt = logging.Formatter("%(asctime)s  %(levelname)s  %(message)s")
+    _fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    _fh.setFormatter(_fmt)
+    _sh = logging.StreamHandler(sys.stdout)
+    _sh.setFormatter(_fmt)
+    log.addHandler(_fh)
+    log.addHandler(_sh)
 
 
 # ─── 状态管理 ─────────────────────────────────────────────────────────────────
@@ -160,7 +161,14 @@ def get_pending_articles(state: dict) -> list[Path]:
     """返回尚未发布的文章，按文件名排序"""
     published_files = {e["file"] for e in state["published"]}
     all_md = sorted(VAULT_DIR.glob("*.md"))
-    return [p for p in all_md if str(p) not in published_files]
+    log.info("待发布目录: %s (exists=%s)", VAULT_DIR, VAULT_DIR.exists())
+    log.info("glob *.md 找到 %d 个文件, 已发布 %d 篇", len(all_md), len(published_files))
+    pending = [p for p in all_md if str(p) not in published_files]
+    if not pending and all_md:
+        log.info("所有文件均已在 published.json 中")
+    elif not all_md:
+        log.info("待发布目录为空")
+    return pending
 
 
 # ─── MCP 调用 ─────────────────────────────────────────────────────────────────
