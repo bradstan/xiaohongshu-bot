@@ -150,43 +150,7 @@ def get_pending_titles() -> List[str]:
     return titles
 
 
-# ─── 小红书搜索 ───────────────────────────────────────────────────────────────
-def search_xiaohongshu(keyword: str) -> List[dict]:
-    """搜索小红书，返回热门笔记列表"""
-    try:
-        result = call_tool("search_feeds", {
-            "keyword": keyword,
-            "filters": {"sort_by": "最多收藏"}
-        })
-        text = ""
-        inner = result.get("result", {}).get("content", [])
-        if inner:
-            text = inner[0].get("text", "")
-        try:
-            data = json.loads(text)
-        except Exception:
-            data = {}
-        feeds = data.get("feeds", [])
-
-        notes = []
-        for feed in feeds[:5]:
-            note_card = feed.get("noteCard", {})
-            title = note_card.get("displayTitle", "") or note_card.get("title", "")
-            interact = note_card.get("interactInfo", {})
-            if title:
-                notes.append({
-                    "title": title,
-                    "collected": interact.get("collectedCount", "0"),
-                    "liked": interact.get("likedCount", "0"),
-                    "source": "小红书",
-                })
-        return notes
-    except Exception as e:
-        log.warning("小红书搜索 [%s] 失败: %s", keyword, e)
-        return []
-
-
-# ─── 小红书笔记详情 ───────────────────────────────────────────────────────────
+# ─── 小红书搜索（限一周内） ───────────────────────────────────────────────────
 def get_feed_content(feed_id: str, xsec_token: str) -> Optional[str]:
     """获取笔记正文内容"""
     try:
@@ -203,11 +167,11 @@ def get_feed_content(feed_id: str, xsec_token: str) -> Optional[str]:
 
 
 def search_xiaohongshu_with_content(keyword: str, max_notes: int = 3) -> List[dict]:
-    """搜索小红书热门内容，包含笔记正文"""
+    """搜索小红书一周内的热门内容，包含笔记正文"""
     try:
         result = call_tool("search_feeds", {
             "keyword": keyword,
-            "filters": {"sort_by": "最多收藏"}
+            "filters": {"sort_by": "最多收藏", "publish_time": "一周内"}
         })
         text = ""
         inner = result.get("result", {}).get("content", [])
@@ -230,7 +194,6 @@ def search_xiaohongshu_with_content(keyword: str, max_notes: int = 3) -> List[di
             if not title or not feed_id:
                 continue
 
-            # 拉正文
             content = get_feed_content(feed_id, xsec_token)
 
             notes.append({
@@ -238,12 +201,82 @@ def search_xiaohongshu_with_content(keyword: str, max_notes: int = 3) -> List[di
                 "content": content or "",
                 "collected": interact.get("collectedCount", "0"),
                 "liked": interact.get("likedCount", "0"),
-                "source": "小红书",
+                "source": "小红书(本周)",
             })
         return notes
     except Exception as e:
         log.warning("小红书搜索 [%s] 失败: %s", keyword, e)
         return []
+
+
+# ─── Web 搜索（最新新闻 + Reddit/X） ─────────────────────────────────────────
+TAVILY_API_KEY = "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"
+TAVILY_URL     = "https://api.tavily.com/search"
+
+
+def search_web(query: str, max_results: int = 5) -> List[dict]:
+    """
+    用 Tavily Search API 搜索最新内容。
+    Tavily 自动过滤时效性，返回近期结果。
+    """
+    try:
+        payload = json.dumps({
+            "api_key": TAVILY_API_KEY,
+            "query": query,
+            "max_results": max_results,
+            "search_depth": "basic",
+            "include_answer": False,
+        }).encode()
+        req = urllib.request.Request(
+            TAVILY_URL, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+
+        results = []
+        for item in data.get("results", [])[:max_results]:
+            results.append({
+                "title": item.get("title", ""),
+                "content": item.get("content", "")[:600],
+                "url": item.get("url", ""),
+                "source": "Web",
+            })
+        return results
+    except Exception as e:
+        log.warning("Web 搜索 [%s] 失败: %s", query, e)
+        return []
+
+
+def fetch_market_context(theme: dict) -> dict:
+    """
+    搜集与主题相关的最新市场数据：
+    1. TSLA 当前股价 + 最新新闻
+    2. Reddit/X 上的热门讨论
+    返回结构化的上下文信息
+    """
+    context = {"news": [], "reddit": [], "price_info": ""}
+
+    # 1. 最新新闻 + 股价
+    keywords = theme.get("keywords", [])
+    main_kw = keywords[0] if keywords else theme.get("name", "")
+    news = search_web(f"Tesla TSLA {main_kw} latest news today {datetime.now().strftime('%Y')}")
+    context["news"] = news
+    log.info("  Web 新闻 %d 条", len(news))
+
+    # 2. Reddit 讨论
+    reddit = search_web(f"site:reddit.com Tesla TSLA options {main_kw} {datetime.now().strftime('%Y-%m')}")
+    context["reddit"] = reddit
+    log.info("  Reddit 参考 %d 条", len(reddit))
+
+    # 3. 当前股价（从新闻结果中提取，或单独搜）
+    price_results = search_web("TSLA Tesla stock price today", max_results=2)
+    if price_results:
+        context["price_info"] = price_results[0].get("content", "")[:300]
+    log.info("  股价数据: %s", "已获取" if context["price_info"] else "未获取")
+
+    return context
 
 
 # ─── Claude CLI 调用 ──────────────────────────────────────────────────────────
@@ -299,26 +332,38 @@ def pick_themes(topics_config: dict, performance: dict,
 
 # ─── 文章生成 ─────────────────────────────────────────────────────────────────
 def generate_article(theme: dict, xhs_refs: List[dict],
-                     performance: dict, topics_config: dict,
-                     now: datetime) -> Optional[dict]:
+                     market_ctx: dict, performance: dict,
+                     topics_config: dict, now: datetime) -> Optional[dict]:
     """
-    给定主题和参考素材，调用 Claude 生成一篇完整的小红书文章。
+    给定主题、小红书参考、实时市场数据，调用 Claude 生成一篇完整文章。
     返回 {"title": ..., "content": ..., "filename": ...} 或 None
     """
     account_desc = topics_config.get("account_description", "")
     target_audience = topics_config.get("target_audience", "")
     content_style = topics_config.get("content_style", "")
 
-    # 准备参考素材文本
-    ref_text = ""
+    # 小红书参考（只取写法风格，不取数据）
+    xhs_style_text = ""
     for i, ref in enumerate(xhs_refs, 1):
-        ref_text += f"\n--- 参考{i}（{ref['source']}，收藏{ref['collected']}，点赞{ref['liked']}）---\n"
-        ref_text += f"标题：{ref['title']}\n"
+        xhs_style_text += f"\n--- 写法参考{i}（{ref['source']}，收藏{ref['collected']}）---\n"
+        xhs_style_text += f"标题：{ref['title']}\n"
         if ref.get("content"):
-            # 截取前800字避免 prompt 过长
-            ref_text += f"正文：{ref['content'][:800]}\n"
+            xhs_style_text += f"正文摘要：{ref['content'][:500]}\n"
 
-    # 历史表现参考
+    # 最新新闻
+    news_text = ""
+    for i, n in enumerate(market_ctx.get("news", []), 1):
+        news_text += f"\n--- 新闻{i} ---\n标题：{n['title']}\n内容：{n['content']}\n"
+
+    # Reddit 讨论
+    reddit_text = ""
+    for i, r in enumerate(market_ctx.get("reddit", []), 1):
+        reddit_text += f"\n--- Reddit{i} ---\n标题：{r['title']}\n内容：{r['content']}\n"
+
+    # 当前股价
+    price_info = market_ctx.get("price_info", "暂无数据")
+
+    # 历史表现
     perf_text = ""
     if performance:
         sorted_perf = sorted(performance.items(), key=lambda x: x[1]["collected"], reverse=True)
@@ -326,6 +371,22 @@ def generate_article(theme: dict, xhs_refs: List[dict],
             perf_text += f"- 「{title}」收藏{d['collected']} 点赞{d['liked']}\n"
 
     prompt = f"""你是一个小红书内容创作专家。请根据以下信息，创作一篇完整的小红书笔记。
+
+## ⚠️ 关键要求：时效性
+- 今天是 {now.strftime('%Y年%m月%d日')}
+- 文章中的所有数据（股价、事件、新闻）必须来自下方提供的【最新市场数据】
+- 禁止使用任何过时的股价或事件（比如去年的价格区间）
+- 如果不确定某个数据是否最新，就不要写具体数字
+
+## 当前市场数据
+**TSLA 最新股价信息：**
+{price_info}
+
+**最新新闻（本周）：**
+{news_text if news_text else '暂无最新新闻'}
+
+**Reddit/X 热门讨论：**
+{reddit_text if reddit_text else '暂无讨论'}
 
 ## 账号定位
 - 描述：{account_desc}
@@ -337,20 +398,20 @@ def generate_article(theme: dict, xhs_refs: List[dict],
 - 说明：{theme['description']}
 - 关键词：{', '.join(theme.get('keywords', []))}
 
-## 参考素材（来自小红书热门内容）
-{ref_text if ref_text else '暂无参考素材'}
+## 小红书热门写法参考（仅参考标题风格和结构，不要复制内容）
+{xhs_style_text if xhs_style_text else '暂无参考'}
 
-## 历史表现最好的文章（供参考风格和方向）
+## 历史表现最好的文章（供参考风格方向）
 {perf_text if perf_text else '暂无历史数据'}
 
 ## 写作要求
-1. 标题：20字以内，要有数字冲击感+痛点/悬念，让人想点进来
-2. 正文：800-1000字（不超过1000字），小红书有字数限制
-3. 开头3行要抓人：数字hook、痛点共鸣、或反常识观点
-4. 结构清晰：用 ## 小标题分段，善用 **粗体** 强调
-5. 实战导向：有具体数字、案例、操作步骤，避免纯理论
+1. 标题：20字以内，数字冲击感+痛点/悬念
+2. 正文：800-1000字（不超过1000字，小红书限制）
+3. 开头3行抓人：最新数据hook、痛点共鸣、或反常识观点
+4. 结构清晰：用 ## 小标题分段，**粗体**强调关键信息
+5. 实战导向：用上方提供的最新数据，有具体数字和操作步骤
 6. 结尾互动：问一个具体问题引导评论
-7. 标签：文末加8-10个标签（#话题#格式）
+7. 标签：文末8-10个标签（#话题#格式）
 
 ## 输出格式
 请严格按照以下格式输出，不要有任何额外说明：
@@ -432,19 +493,24 @@ def main() -> None:
     log.info("选定 %d 个主题: %s", len(selected_themes),
              ", ".join(t["name"] for t in selected_themes))
 
-    # 逐主题：搜索素材 → 生成文章 → 保存
+    # 逐主题：搜索素材 → 获取实时数据 → 生成文章 → 保存
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
     generated = 0
     for theme in selected_themes:
         keyword = theme["keywords"][0]
 
-        # 搜索小红书热门（含正文）
+        # 1. 搜索小红书本周热门（写法参考）
         log.info("搜索小红书素材: %s", keyword)
         xhs_refs = search_xiaohongshu_with_content(keyword, max_notes=3)
         log.info("  小红书参考 %d 条", len(xhs_refs))
 
-        # 生成文章
-        article = generate_article(theme, xhs_refs, performance, topics_config, now)
+        # 2. 搜索 Web 最新数据（新闻 + Reddit + 股价）
+        log.info("搜索 Web 实时数据: %s", theme["name"])
+        market_ctx = fetch_market_context(theme)
+
+        # 3. 生成文章
+        article = generate_article(theme, xhs_refs, market_ctx,
+                                   performance, topics_config, now)
         if not article:
             log.warning("文章生成失败: %s", theme["name"])
             continue
