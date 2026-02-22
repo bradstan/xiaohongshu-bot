@@ -1,0 +1,41 @@
+{
+  "account_description": "美股期权科普账号，面向中文投资者，以TSLA为主要标的，内容风格实战、接地气、有数据支撑",
+  "target_audience": "有一定美股基础、对期权感兴趣但还在学习阶段的投资者",
+  "content_style": "实战案例为主，数字冲击感强，避免纯理论，结尾有互动引导",
+
+  "themes": [
+    {
+      "id": "tsla_options",
+      "name": "TSLA期权实战",
+      "description": "围绕特斯拉的期权策略、持仓案例、市场事件应对",
+      "keywords": ["TSLA期权", "特斯拉期权", "TSLA LEAPS", "特斯拉call"]
+    },
+    {
+      "id": "leaps_strategy",
+      "name": "LEAPS长期期权策略",
+      "description": "LEAPS买入、展期、止盈止损的系统讲解",
+      "keywords": ["LEAPS", "长期期权", "期权展期", "LEAPS策略"]
+    },
+    {
+      "id": "options_basics",
+      "name": "期权入门科普",
+      "description": "适合新手的期权基础知识，Delta/Theta/IV等概念实战化解释",
+      "keywords": ["期权入门", "期权新手", "期权基础", "美股期权"]
+    },
+    {
+      "id": "risk_management",
+      "name": "期权风险管理",
+      "description": "止损纪律、仓位管理、黑天鹅防范",
+      "keywords": ["期权止损", "仓位管理", "期权风险", "期权避坑"]
+    },
+    {
+      "id": "market_events",
+      "name": "市场事件解读",
+      "description": "财报、宏观数据、行业新闻对期权的影响和应对策略",
+      "keywords": ["财报期权", "美股期权策略", "市场波动期权"]
+    }
+  ],
+
+  "posts_per_week": 7,
+  "notes_per_plan": 5
+}
