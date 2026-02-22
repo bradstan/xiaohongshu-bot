@@ -19,10 +19,11 @@ import urllib.request
 import urllib.error
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-STATE_FILE = Path("/Users/jarvis/xiaohongshu-mcp/published.json")
-LOG_FILE   = Path("/Users/jarvis/xiaohongshu-mcp/feedback.log")
-MCP_URL    = "http://localhost:18060/mcp"
-MCP_ACCEPT = "application/json, text/event-stream"
+STATE_FILE  = Path("/Users/jarvis/xiaohongshu-mcp/published.json")
+LOG_FILE    = Path("/Users/jarvis/xiaohongshu-mcp/feedback.log")
+REVIEW_DIR  = Path("/Users/jarvis/Documents/小红书/已发布/复盘")
+MCP_URL     = "http://localhost:18060/mcp"
+MCP_ACCEPT  = "application/json, text/event-stream"
 
 CHECKPOINTS = [
     (30,   "30分钟"),
@@ -270,6 +271,115 @@ def retry_find_feed_id(entry: dict) -> tuple[str, str]:
     return "", ""
 
 
+# ─── 复盘文件生成 ─────────────────────────────────────────────────────────────
+def update_review(state: dict, now: datetime) -> None:
+    """根据 published.json 里的最新数据，自动生成/更新当周复盘文件"""
+    REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 文件名按自然周（周一为起点）
+    week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+    week_end   = (now - timedelta(days=now.weekday()) + timedelta(days=6)).strftime("%Y-%m-%d")
+    review_file = REVIEW_DIR / f"{now.strftime('%Y-%m-%d')}｜已发内容复盘.md"
+
+    # 本周内发布的文章
+    entries = [
+        e for e in state["published"]
+        if e.get("published_at") and e.get("checkpoints")
+    ]
+
+    if not entries:
+        return
+
+    # ── 汇总数据表 ──
+    summary_rows = []
+    for e in entries:
+        cp = e.get("checkpoints", {})
+        # 取最新时间点的数据
+        latest = {}
+        for label in ["24小时", "6小时", "3小时", "1小时", "30分钟"]:
+            if label in cp:
+                latest = cp[label]
+                break
+        title_short = e.get("title", "?")[:20]
+        pub_date = e.get("published_at", "")[:10]
+        liked     = latest.get("liked", "-")
+        collected = latest.get("collected", "-")
+        comment   = latest.get("comment", "-")
+        summary_rows.append(
+            f"| {pub_date} | {title_short} | {liked} | {collected} | {comment} |"
+        )
+
+    summary_table = (
+        "| 发布日期 | 标题 | 点赞 | 收藏 | 评论 |\n"
+        "|----------|------|------|------|------|\n"
+        + "\n".join(summary_rows)
+    )
+
+    # ── 各文章详细趋势 ──
+    detail_sections = []
+    for e in entries:
+        cp = e.get("checkpoints", {})
+        title = e.get("title", "?")
+        pub_date = e.get("published_at", "")[:10]
+        rows = []
+        for label in ["30分钟", "1小时", "3小时", "6小时", "24小时"]:
+            if label in cp:
+                d = cp[label]
+                rows.append(
+                    f"| {label} | {d.get('liked',0)} | {d.get('collected',0)} | {d.get('comment',0)} | {d.get('shared',0)} |"
+                )
+        if not rows:
+            continue
+        table = (
+            "| 时间点 | 点赞 | 收藏 | 评论 | 分享 |\n"
+            "|--------|------|------|------|------|\n"
+            + "\n".join(rows)
+        )
+        detail_sections.append(f"### 📄 {title}\n\n> 发布时间：{pub_date}\n\n{table}")
+
+    detail_str = "\n\n".join(detail_sections)
+
+    # ── 组装复盘文件 ──
+    content = f"""# {now.strftime('%Y-%m-%d')}｜已发内容复盘
+
+> 统计周期：{week_start} ~ {week_end}
+> 最后更新：{now.strftime('%Y-%m-%d %H:%M')}
+
+---
+
+## 一、数据概况
+
+共发布 **{len(entries)}** 篇内容。
+
+{summary_table}
+
+---
+
+## 二、各文章互动趋势
+
+{detail_str}
+
+---
+
+## 三、优化建议
+
+> *(待手动填写)*
+
+---
+
+## 四、下一篇写作方向
+
+> *(待手动填写)*
+
+---
+
+*自动生成 @ {now.strftime('%Y-%m-%d %H:%M')}*
+"""
+
+    review_file.write_text(content, encoding="utf-8")
+    log.info("复盘文件已更新: %s", review_file.name)
+
+
 # ─── 主流程 ───────────────────────────────────────────────────────────────────
 def main() -> None:
     log.info("=" * 50)
@@ -330,6 +440,9 @@ def main() -> None:
         log.info("状态已保存")
     else:
         log.info("无需更新")
+
+    # 每次运行都更新复盘文件（无论是否有新数据）
+    update_review(state, now)
 
 
 if __name__ == "__main__":
