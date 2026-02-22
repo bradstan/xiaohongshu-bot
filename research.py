@@ -150,7 +150,11 @@ def get_pending_titles() -> List[str]:
     return titles
 
 
-# ─── 小红书搜索（限一周内） ───────────────────────────────────────────────────
+# ─── 多平台素材采集（x-reader 风格） ───────────────────────────────────────────
+from collectors import collect_all, materials_to_prompt_text
+
+
+# ─── 以下旧采集代码已废弃，保留 get_feed_content 供 feedback.py 兼容 ─────────
 def get_feed_content(feed_id: str, xsec_token: str) -> Optional[str]:
     """获取笔记正文内容"""
     try:
@@ -395,26 +399,16 @@ def pick_themes(topics_config: dict, performance: dict,
 
 
 # ─── 文章生成 ─────────────────────────────────────────────────────────────────
-def generate_article(theme: dict, xhs_refs: List[dict],
-                     market_ctx: dict, performance: dict,
+def generate_article(theme: dict, ref_text: str,
+                     performance: dict,
                      topics_config: dict, now: datetime) -> Optional[dict]:
     """
-    给定主题和小红书参考，调用 Claude 生成一篇期权知识科普文章。
+    给定主题和多源参考素材，调用 Claude 生成一篇期权知识科普文章。
     返回 {"title": ..., "content": ..., "filename": ...} 或 None
     """
     account_desc = topics_config.get("account_description", "")
     target_audience = topics_config.get("target_audience", "")
     content_style = topics_config.get("content_style", "")
-
-    # 小红书参考（学习写法风格，不学数据）
-    xhs_style_text = ""
-    for i, ref in enumerate(xhs_refs, 1):
-        xhs_style_text += f"\n--- 小红书参考{i}（收藏{ref['collected']}，点赞{ref['liked']}）---\n"
-        xhs_style_text += f"标题：{ref['title']}\n"
-        if ref.get("content") and i <= 5:
-            xhs_style_text += f"正文摘要：{ref['content'][:400]}\n"
-    if xhs_refs:
-        xhs_style_text += f"\n（共研究 {len(xhs_refs)} 篇小红书热门内容）\n"
 
     # 历史表现
     perf_text = ""
@@ -452,8 +446,8 @@ def generate_article(theme: dict, xhs_refs: List[dict],
 - 说明：{theme['description']}
 - 关键词：{', '.join(theme.get('keywords', []))}
 
-## 小红书热门写法参考（学习标题风格和内容结构，不要复制内容或数据）
-{xhs_style_text if xhs_style_text else '暂无参考'}
+## 多平台素材参考（学习写法风格、知识点讲解方式和内容结构，不要复制内容或数据）
+{ref_text}
 
 ## 历史表现最好的文章（供参考风格方向）
 {perf_text if perf_text else '暂无历史数据'}
@@ -600,16 +594,16 @@ def main(force_count: int = None) -> None:
     for theme in selected_themes:
         all_keywords = theme.get("keywords", [])
 
-        # 1. 搜索小红书热门写法参考（多关键词 × 多排序，至少20条）
-        log.info("搜索小红书写法参考: %s（%d个关键词）", theme["name"], len(all_keywords))
-        xhs_refs = search_xiaohongshu_with_content(all_keywords, max_total=20)
-        log.info("  小红书参考 %d 条", len(xhs_refs))
+        # 1. 多平台素材采集（小红书 + YouTube + Reddit + RSS + Web）
+        log.info("多平台采集素材: %s（%d个关键词）", theme["name"], len(all_keywords))
+        materials_by_source = collect_all(
+            keywords=all_keywords,
+            max_per_source=20,
+        )
+        ref_text = materials_to_prompt_text(materials_by_source, max_per_source=10)
 
-        # 2. 科普内容不需要实时市场数据
-        market_ctx = {}
-
-        # 3. 生成文章
-        article = generate_article(theme, xhs_refs, market_ctx,
+        # 2. 生成文章
+        article = generate_article(theme, ref_text,
                                    performance, topics_config, now)
         if not article:
             log.warning("文章生成失败: %s", theme["name"])
