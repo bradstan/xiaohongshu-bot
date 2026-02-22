@@ -20,7 +20,6 @@ else
     echo "$(date): 发布任务失败 (exit=$EXIT_CODE)" >> "$LOG"
 fi
 
-# 3. 顺带检查互动数据（不影响发布结果）
-/usr/bin/python3 "$HOME/xiaohongshu-mcp/feedback.py" >> "$HOME/xiaohongshu-mcp/feedback.log" 2>&1 || true
+# feedback.py 已由 launchd (com.jarvis.xhs-feedback) 每30分钟独立调度，无需在此重复执行
 
 exit $EXIT_CODE

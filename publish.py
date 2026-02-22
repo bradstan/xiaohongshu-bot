@@ -24,9 +24,11 @@ from make_cover import generate_cover
 from mark_published import mark_file
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
+SCRIPT_DIR = Path("/Users/jarvis/xiaohongshu-mcp")
 VAULT_DIR  = Path("/Users/jarvis/Documents/小红书/待发布")
-STATE_FILE = Path("/Users/jarvis/xiaohongshu-mcp/published.json")
-LOG_FILE   = Path("/Users/jarvis/xiaohongshu-mcp/publish.log")
+STATE_FILE = SCRIPT_DIR / "published.json"
+TOPICS_FILE = SCRIPT_DIR / "topics.json"
+LOG_FILE   = SCRIPT_DIR / "publish.log"
 MCP_URL    = "http://localhost:18060/mcp"
 MCP_ACCEPT = "application/json, text/event-stream"
 
@@ -155,6 +157,21 @@ def parse_article(path: Path) -> dict:
         "tags": list(dict.fromkeys(tags)),
         "file": str(path),
     }
+
+
+def infer_theme_id(title: str) -> str:
+    """根据标题关键词匹配 topics.json 中的 theme"""
+    try:
+        if TOPICS_FILE.exists():
+            with TOPICS_FILE.open(encoding="utf-8") as f:
+                topics = json.load(f)
+            for theme in topics.get("themes", []):
+                for kw in theme.get("keywords", []):
+                    if kw.lower() in title.lower():
+                        return theme["id"]
+    except Exception:
+        pass
+    return "unknown"
 
 
 def get_pending_articles(state: dict) -> list[Path]:
@@ -361,6 +378,7 @@ def main() -> None:
         entry = {
             "file": str(target),
             "title": article["title"],
+            "theme_id": infer_theme_id(article["title"]),
             "published_at": datetime.now().isoformat(timespec="seconds"),
             "feed_id": feed_id,
             "xsec_token": xsec_token,

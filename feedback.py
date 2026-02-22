@@ -5,12 +5,14 @@
 - 调用 get_feed_detail 获取点赞/收藏/评论/分享数
 - 回写到对应 Obsidian .md 文件末尾
 - 检查时间点：发布后 30min / 1h / 3h / 6h / 24h
+- 调用 Claude CLI 自动生成优化建议和写作方向
 """
 
 import json
 import re
 import sys
 import logging
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -19,11 +21,14 @@ import urllib.request
 import urllib.error
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-STATE_FILE  = Path("/Users/jarvis/xiaohongshu-mcp/published.json")
-LOG_FILE    = Path("/Users/jarvis/xiaohongshu-mcp/feedback.log")
+SCRIPT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp")
+STATE_FILE  = SCRIPT_DIR / "published.json"
+TOPICS_FILE = SCRIPT_DIR / "topics.json"
+LOG_FILE    = SCRIPT_DIR / "feedback.log"
 REVIEW_DIR  = Path("/Users/jarvis/Documents/小红书/已发布/复盘")
 MCP_URL     = "http://localhost:18060/mcp"
 MCP_ACCEPT  = "application/json, text/event-stream"
+CLAUDE_BIN  = "/Users/jarvis/.npm-global/bin/claude"
 
 CHECKPOINTS = [
     (30,   "30分钟"),
@@ -35,33 +40,56 @@ CHECKPOINTS = [
 
 TRACKING_HEADER = "## 📊 发布数据追踪"
 
-# ─── 日志 ────────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)s  %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-log = logging.getLogger(__name__)
+# ─── 日志（独立 logger，避免 launchd 重定向导致双重输出）────────────────────
+log = logging.getLogger("feedback")
+log.setLevel(logging.INFO)
+if not log.handlers:
+    _fmt = logging.Formatter("%(asctime)s  %(levelname)s  %(message)s")
+    _fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    _fh.setFormatter(_fmt)
+    _sh = logging.StreamHandler(sys.stdout)
+    _sh.setFormatter(_fmt)
+    log.addHandler(_fh)
+    log.addHandler(_sh)
 
 
 # ─── 状态管理 ─────────────────────────────────────────────────────────────────
+def load_topics() -> dict:
+    """加载 topics.json 配置"""
+    if TOPICS_FILE.exists():
+        with TOPICS_FILE.open(encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def infer_theme_id(title: str, topics_config: dict) -> str:
+    """根据标题关键词匹配 topics.json 中的 theme"""
+    for theme in topics_config.get("themes", []):
+        for kw in theme.get("keywords", []):
+            if kw.lower() in title.lower():
+                return theme["id"]
+    return "unknown"
+
+
 def load_state() -> dict:
     if not STATE_FILE.exists():
         return {"published": []}
     with STATE_FILE.open(encoding="utf-8") as f:
         raw = json.load(f)
-    # 兼容旧格式（string 条目）
+    # 兼容旧格式（string 条目）+ 回填 theme_id
+    topics_config = load_topics()
     entries = []
     for e in raw.get("published", []):
         if isinstance(e, str):
             entries.append({"file": e, "title": "", "published_at": "",
-                            "feed_id": "", "xsec_token": "", "checkpoints": {}})
+                            "feed_id": "", "xsec_token": "", "checkpoints": {},
+                            "theme_id": "unknown"})
         else:
             if "checkpoints" not in e:
                 e["checkpoints"] = {}
+            # 回填缺失的 theme_id
+            if "theme_id" not in e:
+                e["theme_id"] = infer_theme_id(e.get("title", ""), topics_config)
             entries.append(e)
     raw["published"] = entries
     return raw
@@ -74,6 +102,17 @@ def save_state(state: dict) -> None:
 
 # ─── MCP 调用 ─────────────────────────────────────────────────────────────────
 _session_id: Optional[str] = None
+
+
+def ensure_mcp_running() -> None:
+    """确保 MCP server 在运行（调用 start_mcp.sh）"""
+    try:
+        subprocess.run(
+            ["/bin/bash", str(SCRIPT_DIR / "start_mcp.sh")],
+            capture_output=True, timeout=30,
+        )
+    except Exception as e:
+        log.warning("启动 MCP 失败: %s", e)
 
 
 def get_session() -> str:
@@ -138,7 +177,7 @@ def fetch_stats(feed_id: str, xsec_token: str) -> Optional[dict]:
             log.warning("get_feed_detail 错误: %s", result["error"])
             return None
 
-        # 新版 MCP 直接返回结构化 JSON，路径：result["data"]["note"]["interactInfo"]
+        # 新版 MCP 直接返回结构化 JSON
         interact = (
             result.get("data", {}).get("note", {}).get("interactInfo") or
             result.get("data", {}).get("interactInfo") or
@@ -163,7 +202,6 @@ def fetch_stats(feed_id: str, xsec_token: str) -> Optional[dict]:
                 {}
             )
 
-        # 有时 likedCount 是字符串数字
         def to_int(val) -> int:
             try:
                 return int(str(val).replace(",", "").replace(".", ""))
@@ -201,47 +239,53 @@ def write_stats_to_md(md_path_str: str, label: str, stats: dict) -> None:
         log.warning("文件不存在，跳过: %s", md_path_str)
         return
 
-    text = md_path.read_text(encoding="utf-8")
-    new_row = f"| {label} | {stats['liked']} | {stats['collected']} | {stats['comment']} | {stats['shared']} |"
+    try:
+        text = md_path.read_text(encoding="utf-8")
+        new_row = f"| {label} | {stats['liked']} | {stats['collected']} | {stats['comment']} | {stats['shared']} |"
 
-    if TRACKING_HEADER in text:
-        # 已有表格：检查该时间点行是否已存在
-        if f"| {label} |" in text:
-            # 更新已有行
-            text = re.sub(
-                rf'\| {re.escape(label)} \|[^\n]*',
-                new_row,
-                text,
-            )
+        if TRACKING_HEADER in text:
+            if f"| {label} |" in text:
+                text = re.sub(
+                    rf'\| {re.escape(label)} \|[^\n]*',
+                    new_row,
+                    text,
+                )
+            else:
+                lines = text.splitlines()
+                insert_at = len(lines)
+                in_table = False
+                for i, line in enumerate(lines):
+                    if TRACKING_HEADER in line:
+                        in_table = True
+                    if in_table and line.startswith("|"):
+                        insert_at = i + 1
+                lines.insert(insert_at, new_row)
+                text = "\n".join(lines)
         else:
-            # 在最后一个表格行后追加
-            # 找表格末尾（最后一个 | 开头的行后面插入）
-            lines = text.splitlines()
-            insert_at = len(lines)
-            in_table = False
-            for i, line in enumerate(lines):
-                if TRACKING_HEADER in line:
-                    in_table = True
-                if in_table and line.startswith("|"):
-                    insert_at = i + 1
-            lines.insert(insert_at, new_row)
-            text = "\n".join(lines)
-    else:
-        # 没有表格：追加到文件末尾
-        text = text.rstrip() + TABLE_HEADER + new_row + "\n"
+            text = text.rstrip() + TABLE_HEADER + new_row + "\n"
 
-    md_path.write_text(text, encoding="utf-8")
-    log.info("已写入 %s → %s", label, md_path.name)
+        md_path.write_text(text, encoding="utf-8")
+        log.info("已写入 %s → %s", label, md_path.name)
+    except PermissionError:
+        log.warning("无文件写入权限（macOS TCC），跳过写 md: %s", md_path.name)
+    except Exception as e:
+        log.warning("写 md 文件失败: %s — %s", md_path.name, e)
 
 
 # ─── 重试搜索 feed_id ─────────────────────────────────────────────────────────
 def retry_find_feed_id(entry: dict) -> tuple[str, str]:
-    """对 feed_id 为空的条目重新搜索"""
+    """
+    对 feed_id 为空的条目重新搜索。
+    策略：1) 用标题前 10 字搜索  2) 用 list_feeds 从主页匹配
+    """
     title = entry.get("title", "")
     if not title:
         return "", ""
+
+    # ── 策略 1: 关键词搜索（用短标题避免截断不匹配）──
     try:
-        result = call_tool("search_feeds", {"keyword": title})
+        short_keyword = title[:10]
+        result = call_tool("search_feeds", {"keyword": short_keyword})
         text = ""
         inner = result.get("result", {}).get("content", [])
         if inner:
@@ -258,43 +302,126 @@ def retry_find_feed_id(entry: dict) -> tuple[str, str]:
         clean_title = re.sub(r'\s+', '', title)
         for feed in feeds:
             note_card = feed.get("noteCard", {})
-            display_title = note_card.get("displayTitle", "")
-            if clean_title in re.sub(r'\s+', '', display_title) or \
-               re.sub(r'\s+', '', display_title) in clean_title:
+            display_title = re.sub(r'\s+', '', note_card.get("displayTitle", ""))
+            if clean_title in display_title or display_title in clean_title:
                 fid = feed.get("id", "")
                 tok = feed.get("xsecToken", "")
                 if fid:
-                    log.info("重试找到 feed_id: %s → %s", title, fid)
+                    log.info("搜索找到 feed_id: %s → %s", title[:15], fid)
                     return fid, tok
     except Exception as e:
-        log.warning("重试搜索 feed_id 失败: %s", e)
+        log.warning("搜索 feed_id 失败: %s", e)
+
+    # ── 策略 2: 从用户主页 feeds 匹配 ──
+    try:
+        result = call_tool("list_feeds", {})
+        text = ""
+        inner = result.get("result", {}).get("content", [])
+        if inner:
+            text = inner[0].get("text", "")
+        try:
+            feeds_data = json.loads(text)
+        except Exception:
+            feeds_data = {}
+
+        feeds = []
+        if isinstance(feeds_data, dict):
+            feeds = feeds_data.get("feeds", []) or feeds_data.get("items", [])
+        elif isinstance(feeds_data, list):
+            feeds = feeds_data
+
+        clean_title = re.sub(r'\s+', '', title)
+        for feed in feeds:
+            note_card = feed.get("noteCard", {})
+            display_title = re.sub(r'\s+', '', note_card.get("displayTitle", ""))
+            if clean_title in display_title or display_title in clean_title:
+                fid = feed.get("id", "")
+                tok = feed.get("xsecToken", "")
+                if fid:
+                    log.info("主页匹配找到 feed_id: %s → %s", title[:15], fid)
+                    return fid, tok
+    except Exception as e:
+        log.warning("主页匹配 feed_id 失败: %s", e)
+
     return "", ""
 
 
+# ─── Claude CLI 调用 ─────────────────────────────────────────────────────────
+def call_claude(prompt: str) -> Optional[str]:
+    """调用 Claude CLI 生成文本"""
+    try:
+        result = subprocess.run(
+            [CLAUDE_BIN, "--print", "--max-turns", "1", "-p", prompt],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            log.warning("Claude CLI 错误: %s", result.stderr[:200])
+            return None
+        return result.stdout.strip()
+    except Exception as e:
+        log.warning("Claude CLI 调用失败: %s", e)
+        return None
+
+
 # ─── 复盘文件生成 ─────────────────────────────────────────────────────────────
-def update_review(state: dict, now: datetime) -> None:
+def build_data_summary(entries: list) -> str:
+    """将所有已发文章的 checkpoint 数据格式化为分析用文本"""
+    sections = []
+    for e in entries:
+        cp = e.get("checkpoints", {})
+        title = e.get("title", "?")
+        theme = e.get("theme_id", "unknown")
+        pub_date = e.get("published_at", "")[:16]
+
+        rows = []
+        for label in ["30分钟", "1小时", "3小时", "6小时", "24小时"]:
+            if label in cp:
+                d = cp[label]
+                rows.append(f"  {label}: 点赞{d.get('liked',0)} 收藏{d.get('collected',0)} "
+                            f"评论{d.get('comment',0)} 分享{d.get('shared',0)}")
+
+        # 计算增长趋势
+        early = cp.get("30分钟", {})
+        latest = {}
+        for label in ["24小时", "6小时", "3小时", "1小时"]:
+            if label in cp:
+                latest = cp[label]
+                break
+        growth = ""
+        if early and latest:
+            delta_c = latest.get("collected", 0) - early.get("collected", 0)
+            delta_l = latest.get("liked", 0) - early.get("liked", 0)
+            growth = f"  增长趋势: 收藏+{delta_c} 点赞+{delta_l}"
+
+        section = f"📄 {title}\n  主题: {theme} | 发布: {pub_date}\n"
+        section += "\n".join(rows)
+        if growth:
+            section += "\n" + growth
+        sections.append(section)
+
+    return "\n\n".join(sections)
+
+
+def update_review(state: dict, now: datetime) -> Path:
     """根据 published.json 里的最新数据，自动生成/更新当周复盘文件"""
     REVIEW_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 文件名按自然周（周一为起点）
     week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
     week_end   = (now - timedelta(days=now.weekday()) + timedelta(days=6)).strftime("%Y-%m-%d")
     review_file = REVIEW_DIR / f"{now.strftime('%Y-%m-%d')}｜已发内容复盘.md"
 
-    # 本周内发布的文章
     entries = [
         e for e in state["published"]
         if e.get("published_at") and e.get("checkpoints")
     ]
 
     if not entries:
-        return
+        return review_file
 
     # ── 汇总数据表 ──
     summary_rows = []
     for e in entries:
         cp = e.get("checkpoints", {})
-        # 取最新时间点的数据
         latest = {}
         for label in ["24小时", "6小时", "3小时", "1小时", "30分钟"]:
             if label in cp:
@@ -302,16 +429,17 @@ def update_review(state: dict, now: datetime) -> None:
                 break
         title_short = e.get("title", "?")[:20]
         pub_date = e.get("published_at", "")[:10]
+        theme = e.get("theme_id", "?")
         liked     = latest.get("liked", "-")
         collected = latest.get("collected", "-")
         comment   = latest.get("comment", "-")
         summary_rows.append(
-            f"| {pub_date} | {title_short} | {liked} | {collected} | {comment} |"
+            f"| {pub_date} | {title_short} | {theme} | {liked} | {collected} | {comment} |"
         )
 
     summary_table = (
-        "| 发布日期 | 标题 | 点赞 | 收藏 | 评论 |\n"
-        "|----------|------|------|------|------|\n"
+        "| 发布日期 | 标题 | 主题 | 点赞 | 收藏 | 评论 |\n"
+        "|----------|------|------|------|------|------|\n"
         + "\n".join(summary_rows)
     )
 
@@ -339,7 +467,7 @@ def update_review(state: dict, now: datetime) -> None:
 
     detail_str = "\n\n".join(detail_sections)
 
-    # ── 组装复盘文件 ──
+    # ── 组装复盘文件（数据部分）──
     content = f"""# {now.strftime('%Y-%m-%d')}｜已发内容复盘
 
 > 统计周期：{week_start} ~ {week_end}
@@ -363,13 +491,13 @@ def update_review(state: dict, now: datetime) -> None:
 
 ## 三、优化建议
 
-> *(待手动填写)*
+> *(待AI分析...)*
 
 ---
 
 ## 四、下一篇写作方向
 
-> *(待手动填写)*
+> *(待AI分析...)*
 
 ---
 
@@ -378,12 +506,97 @@ def update_review(state: dict, now: datetime) -> None:
 
     review_file.write_text(content, encoding="utf-8")
     log.info("复盘文件已更新: %s", review_file.name)
+    return review_file
+
+
+# ─── AI 自动分析 ──────────────────────────────────────────────────────────────
+def generate_analysis(state: dict, review_file: Path, now: datetime) -> None:
+    """
+    调用 Claude CLI 生成优化建议和写作方向，替换复盘文件中的占位符。
+    频率控制：每天最多生成一次（通过检查文件内容判断）。
+    前置条件：至少有 1 篇文章有 6h+ checkpoint 数据。
+    """
+    if not review_file.exists():
+        return
+
+    text = review_file.read_text(encoding="utf-8")
+
+    # 如果已经有 AI 分析内容（不是占位符），跳过
+    if "*(待AI分析...)*" not in text:
+        log.info("复盘文件已有分析内容，跳过 AI 生成")
+        return
+
+    # 检查是否有足够数据
+    entries_with_data = [
+        e for e in state["published"]
+        if any(label in e.get("checkpoints", {})
+               for label in ["6小时", "24小时"])
+    ]
+    if not entries_with_data:
+        log.info("暂无足够 checkpoint 数据（需 6h+），跳过 AI 分析")
+        return
+
+    # 构建分析 prompt
+    data_summary = build_data_summary(
+        [e for e in state["published"] if e.get("checkpoints")]
+    )
+
+    prompt = f"""你是小红书运营数据分析师。根据以下已发布内容的互动数据，生成分析和优化建议。
+
+## 已发布内容数据
+
+{data_summary}
+
+## 分析要求
+
+请生成以下两个章节的完整 Markdown 内容：
+
+### 三、优化建议
+
+分析每篇文章的表现，给出具体可执行的优化建议：
+1. **标题优化**（2条）：针对表现差的文章，给出标题改写建议（原文 → 优化后）
+2. **开头3行优化**（2条）：给出更抓人的开头写法
+3. **结构优化**（2条）：内容结构如何改进（如加行动清单、反面案例等）
+4. **互动引导优化**：如何提高评论率
+
+### 四、下一篇写作方向
+
+基于数据分析，给出具体的下一篇写作指令：
+- 推荐主题和标题（2-3个备选）
+- 为什么选这个方向（数据依据）
+- 内容结构建议
+- 标签建议
+
+注意：
+- 我们是**期权知识科普**账号，不写真实市场数据，用假设场景举例
+- 收藏率高 = 干货属性强，应多出这类内容
+- 评论数 = 互动性强，需加强互动引导
+
+请直接输出 Markdown 格式内容，不要有前后说明文字。"""
+
+    log.info("调用 Claude 生成分析报告...")
+    analysis = call_claude(prompt)
+    if not analysis:
+        log.warning("AI 分析生成失败")
+        return
+
+    # 替换占位符
+    text = text.replace(
+        "## 三、优化建议\n\n> *(待AI分析...)*\n\n---\n\n## 四、下一篇写作方向\n\n> *(待AI分析...)*",
+        analysis
+    )
+
+    review_file.write_text(text, encoding="utf-8")
+    log.info("AI 分析已写入复盘文件")
 
 
 # ─── 主流程 ───────────────────────────────────────────────────────────────────
 def main() -> None:
     log.info("=" * 50)
     log.info("互动数据检查 @ %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    # 确保 MCP server 在运行
+    ensure_mcp_running()
 
     if not check_mcp_alive():
         log.error("MCP server 不可达，跳过")
@@ -395,7 +608,7 @@ def main() -> None:
 
     for entry in state["published"]:
         if not entry.get("published_at"):
-            continue  # 旧格式没有时间戳，跳过
+            continue
 
         try:
             pub_time = datetime.fromisoformat(entry["published_at"])
@@ -404,8 +617,8 @@ def main() -> None:
 
         elapsed_minutes = (now - pub_time).total_seconds() / 60
 
-        # 如果 feed_id 为空，尝试重新搜索（最多在 24h 内重试）
-        if not entry.get("feed_id") and elapsed_minutes < 1500:
+        # 如果 feed_id 为空，尝试重新搜索（48h 内重试）
+        if not entry.get("feed_id") and elapsed_minutes < 2880:
             fid, tok = retry_find_feed_id(entry)
             if fid:
                 entry["feed_id"] = fid
@@ -413,7 +626,7 @@ def main() -> None:
                 changed = True
 
         if not entry.get("feed_id"):
-            continue  # 还没找到 feed_id，跳过
+            continue
 
         feed_id    = entry["feed_id"]
         xsec_token = entry["xsec_token"]
@@ -421,9 +634,9 @@ def main() -> None:
 
         for minutes, label in CHECKPOINTS:
             if label in checkpoints_done:
-                continue  # 已拉过
+                continue
             if elapsed_minutes < minutes:
-                continue  # 时间还没到
+                continue
 
             log.info("拉取 [%s] %s 数据...", entry.get("title", "?"), label)
             stats = fetch_stats(feed_id, xsec_token)
@@ -441,8 +654,9 @@ def main() -> None:
     else:
         log.info("无需更新")
 
-    # 每次运行都更新复盘文件（无论是否有新数据）
-    update_review(state, now)
+    # 更新复盘文件 + AI 分析
+    review_file = update_review(state, now)
+    generate_analysis(state, review_file, now)
 
 
 if __name__ == "__main__":

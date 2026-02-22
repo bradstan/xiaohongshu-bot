@@ -111,22 +111,56 @@ def load_state() -> dict:
 
 # ─── 历史数据分析 ─────────────────────────────────────────────────────────────
 def analyze_past_performance(state: dict) -> dict:
-    """返回各已发文章的最新互动数据"""
+    """返回各已发文章的完整互动数据（含 theme_id、增长趋势）"""
     performance = {}
     for entry in state.get("published", []):
         cp = entry.get("checkpoints", {})
-        data = {}
+        # 取最新时间点数据
+        latest = {}
         for label in ["24小时", "6小时", "3小时", "1小时", "30分钟"]:
             if label in cp:
-                data = cp[label]
+                latest = cp[label]
                 break
-        if not data:
+        if not latest:
             continue
+        # 计算增长趋势（30min → latest）
+        early = cp.get("30分钟", {})
+        velocity = {
+            "collected_growth": latest.get("collected", 0) - early.get("collected", 0),
+            "liked_growth": latest.get("liked", 0) - early.get("liked", 0),
+        }
         performance[entry.get("title", "")] = {
-            "collected": data.get("collected", 0),
-            "liked": data.get("liked", 0),
+            "theme_id":  entry.get("theme_id", "unknown"),
+            "collected": latest.get("collected", 0),
+            "liked":     latest.get("liked", 0),
+            "comment":   latest.get("comment", 0),
+            "shared":    latest.get("shared", 0),
+            "velocity":  velocity,
         }
     return performance
+
+
+def load_latest_review() -> str:
+    """读取最新复盘文件的优化建议部分，供 Claude 参考"""
+    review_dir = Path("/Users/jarvis/Documents/小红书/已发布/复盘")
+    if not review_dir.exists():
+        return ""
+    reviews = sorted(review_dir.glob("*复盘.md"), reverse=True)
+    if not reviews:
+        return ""
+    try:
+        text = reviews[0].read_text(encoding="utf-8")
+        # 提取第三章（优化建议/可执行优化）到文件末尾之间的内容
+        match = re.search(r'## 三、[^\n]+\n(.*?)(?=---\n\*自动生成|$)', text, re.DOTALL)
+        if match:
+            content = match.group(1).strip()
+            # 跳过空占位符
+            if "待AI分析" in content or "待手动填写" in content:
+                return ""
+            return content[:2000]  # 限制长度
+    except Exception:
+        pass
+    return ""
 
 
 def get_published_titles(state: dict) -> List[str]:
@@ -410,12 +444,39 @@ def generate_article(theme: dict, ref_text: str,
     target_audience = topics_config.get("target_audience", "")
     content_style = topics_config.get("content_style", "")
 
-    # 历史表现
+    # 历史表现（丰富版：含主题维度+增长趋势+失败分析）
     perf_text = ""
     if performance:
         sorted_perf = sorted(performance.items(), key=lambda x: x[1]["collected"], reverse=True)
-        for title, d in sorted_perf[:3]:
-            perf_text += f"- 「{title}」收藏{d['collected']} 点赞{d['liked']}\n"
+        # Top5 排名
+        perf_text += "### 表现排名（按收藏排序）\n"
+        for title, d in sorted_perf[:5]:
+            perf_text += (f"- 「{title}」[{d['theme_id']}] "
+                          f"收藏{d['collected']} 点赞{d['liked']} "
+                          f"评论{d['comment']} 分享{d['shared']}\n")
+        # 主题维度
+        theme_stats = {}
+        for title, d in performance.items():
+            tid = d["theme_id"]
+            if tid not in theme_stats:
+                theme_stats[tid] = {"total_collected": 0, "count": 0}
+            theme_stats[tid]["total_collected"] += d["collected"]
+            theme_stats[tid]["count"] += 1
+        perf_text += "\n### 主题维度表现\n"
+        for tid, stats in sorted(theme_stats.items(), key=lambda x: x[1]["total_collected"], reverse=True):
+            avg = stats["total_collected"] / stats["count"]
+            perf_text += f"- {tid}: 平均收藏{avg:.0f}（{stats['count']}篇）\n"
+        # 失败分析
+        if len(sorted_perf) > 2:
+            perf_text += "\n### 表现较差的内容（需避开类似方向）\n"
+            for title, d in sorted_perf[-2:]:
+                perf_text += f"- 「{title}」收藏{d['collected']} 点赞{d['liked']}\n"
+
+    # 读取最新复盘的优化建议
+    review_insights = load_latest_review()
+    review_section = ""
+    if review_insights:
+        review_section = f"\n## 上一轮复盘的优化建议（重点参考！）\n{review_insights}\n"
 
     prompt = f"""你是一个小红书期权知识科普创作专家。请根据以下信息，创作一篇完整的小红书笔记。
 
@@ -449,9 +510,9 @@ def generate_article(theme: dict, ref_text: str,
 ## 多平台素材参考（学习写法风格、知识点讲解方式和内容结构，不要复制内容或数据）
 {ref_text}
 
-## 历史表现最好的文章（供参考风格方向）
+## 历史表现分析（供参考风格方向）
 {perf_text if perf_text else '暂无历史数据'}
-
+{review_section}
 ## 写作要求
 1. 标题：20字以内，数字冲击感+痛点/悬念（如"90%新手不懂的XX"）
 2. 正文字数：最多600字！这是发布平台的硬性上限，超过就废稿。宁可少讲一个点，也绝不超600字。免责声明和标签不算在内。写完后自己数一遍
