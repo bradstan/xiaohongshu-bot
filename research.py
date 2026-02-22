@@ -166,12 +166,12 @@ def get_feed_content(feed_id: str, xsec_token: str) -> Optional[str]:
         return None
 
 
-def search_xiaohongshu_with_content(keyword: str, max_notes: int = 3) -> List[dict]:
-    """搜索小红书一周内的热门内容，包含笔记正文"""
+def _search_xhs_single(keyword: str, sort_by: str, max_notes: int) -> List[dict]:
+    """单次小红书搜索，返回笔记列表"""
     try:
         result = call_tool("search_feeds", {
             "keyword": keyword,
-            "filters": {"sort_by": "最多收藏", "publish_time": "一周内"}
+            "filters": {"sort_by": sort_by, "publish_time": "一周内"}
         })
         text = ""
         inner = result.get("result", {}).get("content", [])
@@ -184,6 +184,7 @@ def search_xiaohongshu_with_content(keyword: str, max_notes: int = 3) -> List[di
         feeds = data.get("feeds", [])
 
         notes = []
+        seen_ids = set()
         for feed in feeds[:max_notes]:
             note_card = feed.get("noteCard", {})
             title = note_card.get("displayTitle", "") or note_card.get("title", "")
@@ -191,8 +192,9 @@ def search_xiaohongshu_with_content(keyword: str, max_notes: int = 3) -> List[di
             feed_id = feed.get("id", "")
             xsec_token = feed.get("xsecToken", "")
 
-            if not title or not feed_id:
+            if not title or not feed_id or feed_id in seen_ids:
                 continue
+            seen_ids.add(feed_id)
 
             content = get_feed_content(feed_id, xsec_token)
 
@@ -201,12 +203,40 @@ def search_xiaohongshu_with_content(keyword: str, max_notes: int = 3) -> List[di
                 "content": content or "",
                 "collected": interact.get("collectedCount", "0"),
                 "liked": interact.get("likedCount", "0"),
-                "source": "小红书(本周)",
+                "source": f"小红书({sort_by})",
             })
         return notes
     except Exception as e:
-        log.warning("小红书搜索 [%s] 失败: %s", keyword, e)
+        log.warning("小红书搜索 [%s/%s] 失败: %s", keyword, sort_by, e)
         return []
+
+
+def search_xiaohongshu_with_content(keywords: List[str], max_total: int = 20) -> List[dict]:
+    """
+    用多个关键词 × 多个排序维度搜索小红书，去重后返回 max_total 条。
+    每个关键词分别按「最多收藏」和「最多点赞」搜索，扩大覆盖面。
+    """
+    all_notes = []
+    seen_titles = set()
+    per_query = max(5, max_total // max(len(keywords) * 2, 1))
+
+    for kw in keywords:
+        for sort_by in ["最多收藏", "最多点赞"]:
+            batch = _search_xhs_single(kw, sort_by, per_query)
+            for note in batch:
+                # 按标题去重
+                clean = re.sub(r'\s+', '', note["title"])
+                if clean not in seen_titles:
+                    seen_titles.add(clean)
+                    all_notes.append(note)
+            if len(all_notes) >= max_total:
+                break
+        if len(all_notes) >= max_total:
+            break
+
+    # 按收藏数降序排列，取 top N
+    all_notes.sort(key=lambda x: int(str(x.get("collected", 0)).replace(",", "") or 0), reverse=True)
+    return all_notes[:max_total]
 
 
 # ─── Web 搜索（最新新闻 + Reddit/X） ─────────────────────────────────────────
@@ -252,28 +282,62 @@ def search_web(query: str, max_results: int = 5) -> List[dict]:
 def fetch_market_context(theme: dict) -> dict:
     """
     搜集与主题相关的最新市场数据：
-    1. TSLA 当前股价 + 最新新闻
-    2. Reddit/X 上的热门讨论
+    1. TSLA 当前股价 + 最新新闻（多轮搜索，至少20条）
+    2. Reddit/X 上的热门讨论（多轮搜索，至少20条）
     返回结构化的上下文信息
     """
     context = {"news": [], "reddit": [], "price_info": ""}
 
-    # 1. 最新新闻 + 股价
     keywords = theme.get("keywords", [])
     main_kw = keywords[0] if keywords else theme.get("name", "")
-    news = search_web(f"Tesla TSLA {main_kw} latest news today {datetime.now().strftime('%Y')}")
-    context["news"] = news
-    log.info("  Web 新闻 %d 条", len(news))
+    year = datetime.now().strftime('%Y')
+    month = datetime.now().strftime('%Y-%m')
 
-    # 2. Reddit 讨论
-    reddit = search_web(f"site:reddit.com Tesla TSLA options {main_kw} {datetime.now().strftime('%Y-%m')}")
-    context["reddit"] = reddit
-    log.info("  Reddit 参考 %d 条", len(reddit))
+    # 1. 最新新闻（多轮搜索，不同角度，合计 20 条）
+    news_queries = [
+        f"Tesla TSLA {main_kw} latest news today {year}",
+        f"TSLA options market {main_kw} {year}",
+        f"Tesla stock analysis {main_kw} this week {year}",
+        f"TSLA earnings outlook {main_kw} {year}",
+    ]
+    all_news = []
+    seen_urls = set()
+    for q in news_queries:
+        batch = search_web(q, max_results=10)
+        for item in batch:
+            if item["url"] not in seen_urls:
+                seen_urls.add(item["url"])
+                all_news.append(item)
+        if len(all_news) >= 20:
+            break
+    context["news"] = all_news[:20]
+    log.info("  Web 新闻 %d 条", len(context["news"]))
 
-    # 3. 当前股价（从新闻结果中提取，或单独搜）
-    price_results = search_web("TSLA Tesla stock price today", max_results=2)
+    # 2. Reddit 讨论（多轮搜索，合计 20 条）
+    reddit_queries = [
+        f"site:reddit.com Tesla TSLA options {main_kw} {month}",
+        f"site:reddit.com TSLA call put strategy {month}",
+        f"site:reddit.com r/options TSLA {main_kw} {year}",
+        f"site:reddit.com r/wallstreetbets TSLA {year}",
+    ]
+    all_reddit = []
+    seen_reddit_urls = set()
+    for q in reddit_queries:
+        batch = search_web(q, max_results=10)
+        for item in batch:
+            if item["url"] not in seen_reddit_urls:
+                seen_reddit_urls.add(item["url"])
+                item["source"] = "Reddit"
+                all_reddit.append(item)
+        if len(all_reddit) >= 20:
+            break
+    context["reddit"] = all_reddit[:20]
+    log.info("  Reddit 参考 %d 条", len(context["reddit"]))
+
+    # 3. 当前股价
+    price_results = search_web("TSLA Tesla stock price today", max_results=3)
     if price_results:
-        context["price_info"] = price_results[0].get("content", "")[:300]
+        context["price_info"] = price_results[0].get("content", "")[:500]
     log.info("  股价数据: %s", "已获取" if context["price_info"] else "未获取")
 
     return context
@@ -288,7 +352,7 @@ def call_claude(prompt: str, max_tokens: int = 4096) -> Optional[str]:
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
         )
         if result.returncode != 0:
             log.warning("Claude CLI 错误: %s", result.stderr[:500])
@@ -342,23 +406,29 @@ def generate_article(theme: dict, xhs_refs: List[dict],
     target_audience = topics_config.get("target_audience", "")
     content_style = topics_config.get("content_style", "")
 
-    # 小红书参考（只取写法风格，不取数据）
+    # 小红书参考（top 5 含正文摘要，其余只列标题+数据）
     xhs_style_text = ""
     for i, ref in enumerate(xhs_refs, 1):
-        xhs_style_text += f"\n--- 写法参考{i}（{ref['source']}，收藏{ref['collected']}）---\n"
+        xhs_style_text += f"\n--- 小红书参考{i}（{ref['source']}，收藏{ref['collected']}，点赞{ref['liked']}）---\n"
         xhs_style_text += f"标题：{ref['title']}\n"
-        if ref.get("content"):
-            xhs_style_text += f"正文摘要：{ref['content'][:500]}\n"
+        if ref.get("content") and i <= 5:
+            xhs_style_text += f"正文摘要：{ref['content'][:400]}\n"
+    if xhs_refs:
+        xhs_style_text += f"\n（共研究 {len(xhs_refs)} 篇小红书热门内容）\n"
 
-    # 最新新闻
+    # 最新新闻（全部列出）
     news_text = ""
     for i, n in enumerate(market_ctx.get("news", []), 1):
-        news_text += f"\n--- 新闻{i} ---\n标题：{n['title']}\n内容：{n['content']}\n"
+        news_text += f"\n--- 新闻{i} ---\n标题：{n['title']}\n摘要：{n['content'][:400]}\n"
+    if market_ctx.get("news"):
+        news_text += f"\n（共 {len(market_ctx['news'])} 条最新新闻）\n"
 
-    # Reddit 讨论
+    # Reddit 讨论（全部列出）
     reddit_text = ""
     for i, r in enumerate(market_ctx.get("reddit", []), 1):
-        reddit_text += f"\n--- Reddit{i} ---\n标题：{r['title']}\n内容：{r['content']}\n"
+        reddit_text += f"\n--- Reddit{i} ---\n标题：{r['title']}\n摘要：{r['content'][:400]}\n"
+    if market_ctx.get("reddit"):
+        reddit_text += f"\n（共 {len(market_ctx['reddit'])} 条 Reddit 讨论）\n"
 
     # 当前股价
     price_info = market_ctx.get("price_info", "暂无数据")
@@ -532,11 +602,11 @@ def main(force_count: int = None) -> None:
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
     generated = 0
     for theme in selected_themes:
-        keyword = theme["keywords"][0]
+        all_keywords = theme.get("keywords", [])
 
-        # 1. 搜索小红书本周热门（写法参考）
-        log.info("搜索小红书素材: %s", keyword)
-        xhs_refs = search_xiaohongshu_with_content(keyword, max_notes=3)
+        # 1. 搜索小红书本周热门（多关键词 × 多排序，至少20条）
+        log.info("搜索小红书素材: %s（%d个关键词）", theme["name"], len(all_keywords))
+        xhs_refs = search_xiaohongshu_with_content(all_keywords, max_total=20)
         log.info("  小红书参考 %d 条", len(xhs_refs))
 
         # 2. 搜索 Web 最新数据（新闻 + Reddit + 股价）

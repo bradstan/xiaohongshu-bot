@@ -36,6 +36,7 @@
     }
   ],
 
-  "posts_per_week": 7,
+  "publish_per_day": 2,
+  "posts_per_week": 14,
   "notes_per_plan": 5
 }
