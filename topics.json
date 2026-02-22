@@ -1,38 +1,50 @@
 {
-  "account_description": "美股期权科普账号，面向中文投资者，以TSLA为主要标的，内容风格实战、接地气、有数据支撑",
-  "target_audience": "有一定美股基础、对期权感兴趣但还在学习阶段的投资者",
-  "content_style": "实战案例为主，数字冲击感强，避免纯理论，结尾有互动引导",
+  "account_description": "美股期权知识科普账号，面向中文投资者，用TSLA等热门股票举例讲解期权概念和策略，内容风格接地气、易懂、有趣",
+  "target_audience": "对美股期权感兴趣但还在学习阶段的中文投资者，从零基础到进阶都有",
+  "content_style": "知识科普为主，用假设场景和虚拟案例讲解概念，避免引用真实市场数据，结尾有互动引导",
 
   "themes": [
     {
-      "id": "tsla_options",
-      "name": "TSLA期权实战",
-      "description": "围绕特斯拉的期权策略、持仓案例、市场事件应对",
-      "keywords": ["TSLA期权", "特斯拉期权", "TSLA LEAPS", "特斯拉call"]
-    },
-    {
-      "id": "leaps_strategy",
-      "name": "LEAPS长期期权策略",
-      "description": "LEAPS买入、展期、止盈止损的系统讲解",
-      "keywords": ["LEAPS", "长期期权", "期权展期", "LEAPS策略"]
-    },
-    {
       "id": "options_basics",
-      "name": "期权入门科普",
-      "description": "适合新手的期权基础知识，Delta/Theta/IV等概念实战化解释",
-      "keywords": ["期权入门", "期权新手", "期权基础", "美股期权"]
+      "name": "期权入门概念",
+      "description": "什么是期权、Call/Put区别、行权价、到期日、权利金等基础概念的通俗解释",
+      "keywords": ["期权入门", "期权新手", "什么是期权", "Call Put区别", "美股期权基础"]
     },
     {
-      "id": "risk_management",
-      "name": "期权风险管理",
-      "description": "止损纪律、仓位管理、黑天鹅防范",
-      "keywords": ["期权止损", "仓位管理", "期权风险", "期权避坑"]
+      "id": "greeks_explained",
+      "name": "希腊字母实战解读",
+      "description": "Delta/Gamma/Theta/Vega/IV的直觉化解释，用生活化比喻让新手秒懂",
+      "keywords": ["Delta期权", "Theta时间价值", "IV隐含波动率", "期权希腊字母", "Vega期权"]
     },
     {
-      "id": "market_events",
-      "name": "市场事件解读",
-      "description": "财报、宏观数据、行业新闻对期权的影响和应对策略",
-      "keywords": ["财报期权", "美股期权策略", "市场波动期权"]
+      "id": "strategy_playbook",
+      "name": "期权策略图鉴",
+      "description": "各种策略的科普：covered call、protective put、spread、iron condor、straddle等",
+      "keywords": ["covered call策略", "期权价差策略", "iron condor", "期权组合策略", "牛市看涨价差"]
+    },
+    {
+      "id": "leaps_guide",
+      "name": "LEAPS长期期权入门",
+      "description": "LEAPS是什么、为什么适合散户、选择技巧、展期逻辑等系统讲解",
+      "keywords": ["LEAPS期权", "长期期权", "期权展期", "LEAPS策略", "LEAPS入门"]
+    },
+    {
+      "id": "risk_and_mindset",
+      "name": "风控与交易心态",
+      "description": "止损纪律、仓位管理、情绪控制、新手常见误区和避坑指南",
+      "keywords": ["期权止损", "仓位管理", "期权风险", "期权避坑", "交易心态"]
+    },
+    {
+      "id": "options_vs_stocks",
+      "name": "期权vs股票对比",
+      "description": "期权和股票的区别、杠杆效应、资金效率、适用场景对比",
+      "keywords": ["期权vs股票", "期权杠杆", "美股期权优势", "为什么买期权"]
+    },
+    {
+      "id": "earnings_and_events",
+      "name": "财报季期权科普",
+      "description": "财报前后IV变化规律、IV Crush原理、财报季常用策略科普（不涉及具体财报数据）",
+      "keywords": ["财报期权策略", "IV Crush", "财报季期权", "隐含波动率财报"]
     }
   ],
 

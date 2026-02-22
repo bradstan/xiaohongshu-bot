@@ -399,39 +399,22 @@ def generate_article(theme: dict, xhs_refs: List[dict],
                      market_ctx: dict, performance: dict,
                      topics_config: dict, now: datetime) -> Optional[dict]:
     """
-    给定主题、小红书参考、实时市场数据，调用 Claude 生成一篇完整文章。
+    给定主题和小红书参考，调用 Claude 生成一篇期权知识科普文章。
     返回 {"title": ..., "content": ..., "filename": ...} 或 None
     """
     account_desc = topics_config.get("account_description", "")
     target_audience = topics_config.get("target_audience", "")
     content_style = topics_config.get("content_style", "")
 
-    # 小红书参考（top 5 含正文摘要，其余只列标题+数据）
+    # 小红书参考（学习写法风格，不学数据）
     xhs_style_text = ""
     for i, ref in enumerate(xhs_refs, 1):
-        xhs_style_text += f"\n--- 小红书参考{i}（{ref['source']}，收藏{ref['collected']}，点赞{ref['liked']}）---\n"
+        xhs_style_text += f"\n--- 小红书参考{i}（收藏{ref['collected']}，点赞{ref['liked']}）---\n"
         xhs_style_text += f"标题：{ref['title']}\n"
         if ref.get("content") and i <= 5:
             xhs_style_text += f"正文摘要：{ref['content'][:400]}\n"
     if xhs_refs:
         xhs_style_text += f"\n（共研究 {len(xhs_refs)} 篇小红书热门内容）\n"
-
-    # 最新新闻（全部列出）
-    news_text = ""
-    for i, n in enumerate(market_ctx.get("news", []), 1):
-        news_text += f"\n--- 新闻{i} ---\n标题：{n['title']}\n摘要：{n['content'][:400]}\n"
-    if market_ctx.get("news"):
-        news_text += f"\n（共 {len(market_ctx['news'])} 条最新新闻）\n"
-
-    # Reddit 讨论（全部列出）
-    reddit_text = ""
-    for i, r in enumerate(market_ctx.get("reddit", []), 1):
-        reddit_text += f"\n--- Reddit{i} ---\n标题：{r['title']}\n摘要：{r['content'][:400]}\n"
-    if market_ctx.get("reddit"):
-        reddit_text += f"\n（共 {len(market_ctx['reddit'])} 条 Reddit 讨论）\n"
-
-    # 当前股价
-    price_info = market_ctx.get("price_info", "暂无数据")
 
     # 历史表现
     perf_text = ""
@@ -440,33 +423,24 @@ def generate_article(theme: dict, xhs_refs: List[dict],
         for title, d in sorted_perf[:3]:
             perf_text += f"- 「{title}」收藏{d['collected']} 点赞{d['liked']}\n"
 
-    prompt = f"""你是一个小红书内容创作专家。请根据以下信息，创作一篇完整的小红书笔记。
+    prompt = f"""你是一个小红书期权知识科普创作专家。请根据以下信息，创作一篇完整的小红书笔记。
 
-## ⚠️ 关键要求
+## ⚠️ 核心定位：知识科普
 
-### 时效性
-- 今天是 {now.strftime('%Y年%m月%d日')}
-- 文章中的所有数据（股价、事件、新闻）必须来自下方提供的【最新市场数据】
-- 禁止使用任何过时的股价或事件（比如去年的价格区间）
-- 如果不确定某个数据是否最新，就不要写具体数字
-- 提到任何事件（财报、政策、新闻）必须标注具体日期，如"1月29日Q4财报"，禁止写"最近财报""上次财报"这种模糊表述
+这是一个**期权知识科普**账号，不是财经资讯账号。文章目的是**教会读者一个期权概念或策略**。
 
-### 合规红线（必须遵守）
-- 禁止虚构任何交易记录、持仓信息、盈亏数据——我们没有真实持仓可以分享
-- 禁止出现"我的操作"、"我的持仓"、"我买了/卖了"等第一人称交易描述
-- 禁止给出具体的买卖建议（如"现在应该买入XX"），只做策略分析和教育科普
-- 对新闻事件只客观陈述事实，不要擅自判断利好/利空，可以分析"如果...那么..."的场景
-- 文末加一句简短免责：「⚠️ 仅为知识分享，不构成投资建议。」（只要这一句，不要写长段落）
+### 数据使用规则（极其重要！）
+- **禁止引用任何真实的市场数据**：不写真实股价、真实财报数字、真实涨跌幅
+- **禁止引用真实事件作为论据**：不写"XX日财报显示..."、"上周XX消息..."
+- 举例时用**假设场景**：「假设某只股票当前价格100美元...」「假设你看好某只科技股...」
+- 可以用TSLA、AAPL、NVDA等热门股票**举例说明概念**，但不要写它们的真实价格
+- 举例的数字要**合理但明确是假设**：用整数（如100美元、50美元），避免写得像真实数据（如411.82美元）
 
-## 当前市场数据
-**TSLA 最新股价信息：**
-{price_info}
-
-**最新新闻（本周）：**
-{news_text if news_text else '暂无最新新闻'}
-
-**Reddit/X 热门讨论：**
-{reddit_text if reddit_text else '暂无讨论'}
+### 合规红线
+- 禁止虚构交易记录、持仓信息、盈亏数据
+- 禁止"我买了/卖了"等第一人称交易描述
+- 禁止给出具体买卖建议，只做概念讲解和策略科普
+- 文末加一句：「⚠️ 仅为知识分享，不构成投资建议。」
 
 ## 账号定位
 - 描述：{account_desc}
@@ -478,18 +452,18 @@ def generate_article(theme: dict, xhs_refs: List[dict],
 - 说明：{theme['description']}
 - 关键词：{', '.join(theme.get('keywords', []))}
 
-## 小红书热门写法参考（仅参考标题风格和结构，不要复制内容）
+## 小红书热门写法参考（学习标题风格和内容结构，不要复制内容或数据）
 {xhs_style_text if xhs_style_text else '暂无参考'}
 
 ## 历史表现最好的文章（供参考风格方向）
 {perf_text if perf_text else '暂无历史数据'}
 
 ## 写作要求
-1. 标题：20字以内，数字冲击感+痛点/悬念
-2. 正文：严格控制在700-800字以内（这是硬性限制！超过800字无法发布，宁可精简也不要超字数。免责声明和标签不算在内）
-3. 开头3行抓人：最新数据hook、痛点共鸣、或反常识观点
-4. 结构清晰：用 ## 小标题分段，**粗体**强调关键信息
-5. 实战导向：用上方提供的最新数据，有具体数字和操作步骤
+1. 标题：20字以内，数字冲击感+痛点/悬念（如"90%新手不懂的XX"）
+2. 正文字数：最多600字！这是发布平台的硬性上限，超过就废稿。宁可少讲一个点，也绝不超600字。免责声明和标签不算在内。写完后自己数一遍
+3. 开头3行抓人：痛点共鸣、反常识观点、或"你知道吗"式提问
+4. 结构清晰：用 ## 小标题分段，**粗体**强调关键概念
+5. 科普导向：把复杂概念讲得通俗易懂，多用比喻和假设场景，少用术语堆砌
 6. 结尾互动：问一个具体问题引导评论
 7. 标签：文末8-10个标签（#话题#格式）
 
@@ -517,25 +491,46 @@ version: v1.0
     if not article:
         return None
 
-    # 从生成内容中提取标题
-    title_match = re.search(r'^#\s+(.+)$', article, re.MULTILINE)
-    if not title_match:
-        log.warning("无法从生成内容中提取标题")
-        return None
+    # ─── 字数检查 + 超限重试（最多重试1次） ───
+    MAX_WORD_COUNT = 1000
+    for attempt in range(2):
+        title_match = re.search(r'^#\s+(.+)$', article, re.MULTILINE)
+        if not title_match:
+            log.warning("无法从生成内容中提取标题")
+            return None
+
+        # 计算正文字数（去掉 frontmatter、标题行、标签行、分隔线、免责声明）
+        body = article
+        body = re.sub(r'^---\n.*?\n---\n', '', body, count=1, flags=re.DOTALL)
+        body = re.sub(r'^#\s+.+\n', '', body, count=1, flags=re.MULTILINE)
+        body = re.sub(r'^\*标签：.+\*$', '', body, flags=re.MULTILINE)
+        body = re.sub(r'^\*版本：.+\*$', '', body, flags=re.MULTILINE)
+        body = re.sub(r'^---+$', '', body, flags=re.MULTILINE)
+        body = re.sub(r'^⚠️.*$', '', body, flags=re.MULTILINE)
+        word_count = len(re.sub(r'\s+', '', body))
+
+        if word_count <= MAX_WORD_COUNT:
+            break
+
+        if attempt == 0:
+            log.warning("⚠️ 正文 %d 字超限，要求 Claude 精简...", word_count)
+            trim_prompt = f"""以下文章正文有 {word_count} 字，超出了600字的硬性限制。
+请精简到600字以内，保持原有格式（frontmatter + 标题 + 正文 + 免责 + 标签）不变。
+删减内容时优先砍掉次要的例子和重复的解释，保留核心概念和结构。
+直接输出精简后的完整文章，不要有任何额外说明。
+
+{article}"""
+            trimmed = call_claude(trim_prompt)
+            if trimmed:
+                article = trimmed
+            else:
+                log.warning("精简重试失败，使用原文")
+                break
+        else:
+            log.warning("⚠️ 精简后仍有 %d 字，使用当前版本", word_count)
 
     raw_title = title_match.group(1).strip()
-
-    # 计算正文字数（去掉 frontmatter、标题行、标签行、分隔线）
-    body = article
-    body = re.sub(r'^---\n.*?\n---\n', '', body, count=1, flags=re.DOTALL)  # frontmatter
-    body = re.sub(r'^#\s+.+\n', '', body, count=1, flags=re.MULTILINE)      # 标题行
-    body = re.sub(r'^\*标签：.+\*$', '', body, flags=re.MULTILINE)           # 标签行
-    body = re.sub(r'^\*版本：.+\*$', '', body, flags=re.MULTILINE)           # 版本行
-    body = re.sub(r'^---+$', '', body, flags=re.MULTILINE)                   # 分隔线
-    word_count = len(re.sub(r'\s+', '', body))
-
-    if word_count > 1000:
-        log.warning("⚠️ 正文 %d 字，超出小红书1000字限制！", word_count)
+    word_count = word_count  # 使用循环最后计算的值
 
     # 在 frontmatter 中插入 word_count
     article = re.sub(
@@ -605,14 +600,13 @@ def main(force_count: int = None) -> None:
     for theme in selected_themes:
         all_keywords = theme.get("keywords", [])
 
-        # 1. 搜索小红书本周热门（多关键词 × 多排序，至少20条）
-        log.info("搜索小红书素材: %s（%d个关键词）", theme["name"], len(all_keywords))
+        # 1. 搜索小红书热门写法参考（多关键词 × 多排序，至少20条）
+        log.info("搜索小红书写法参考: %s（%d个关键词）", theme["name"], len(all_keywords))
         xhs_refs = search_xiaohongshu_with_content(all_keywords, max_total=20)
         log.info("  小红书参考 %d 条", len(xhs_refs))
 
-        # 2. 搜索 Web 最新数据（新闻 + Reddit + 股价）
-        log.info("搜索 Web 实时数据: %s", theme["name"])
-        market_ctx = fetch_market_context(theme)
+        # 2. 科普内容不需要实时市场数据
+        market_ctx = {}
 
         # 3. 生成文章
         article = generate_article(theme, xhs_refs, market_ctx,
