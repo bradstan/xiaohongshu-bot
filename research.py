@@ -415,7 +415,7 @@ def generate_article(theme: dict, xhs_refs: List[dict],
 
 ## 写作要求
 1. 标题：20字以内，数字冲击感+痛点/悬念
-2. 正文：800-1000字（不超过1000字，小红书限制）
+2. 正文：严格控制在700-800字以内（这是硬性限制！超过800字无法发布，宁可精简也不要超字数。免责声明和标签不算在内）
 3. 开头3行抓人：最新数据hook、痛点共鸣、或反常识观点
 4. 结构清晰：用 ## 小标题分段，**粗体**强调关键信息
 5. 实战导向：用上方提供的最新数据，有具体数字和操作步骤
@@ -463,6 +463,9 @@ version: v1.0
     body = re.sub(r'^---+$', '', body, flags=re.MULTILINE)                   # 分隔线
     word_count = len(re.sub(r'\s+', '', body))
 
+    if word_count > 1000:
+        log.warning("⚠️ 正文 %d 字，超出小红书1000字限制！", word_count)
+
     # 在 frontmatter 中插入 word_count
     article = re.sub(
         r'^(---\ntags:.*?\ndate:.*?\nversion:.*?)\n---',
@@ -486,7 +489,7 @@ version: v1.0
 
 
 # ─── 主流程 ───────────────────────────────────────────────────────────────────
-def main() -> None:
+def main(force_count: int = None) -> None:
     log.info("=" * 50)
     log.info("全自动内容生产 @ %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -505,11 +508,15 @@ def main() -> None:
     log.info("已发布 %d 篇，待发布 %d 篇", len(published_titles), len(pending_titles))
 
     # 计算还需要生成几篇（每周目标 - 待发布库存）
-    posts_per_week = topics_config.get("posts_per_week", 7)
-    notes_needed = max(0, posts_per_week - len(pending_titles))
-    if notes_needed == 0:
-        log.info("待发布库存充足（%d 篇），本次不生成新内容", len(pending_titles))
-        return
+    if force_count:
+        notes_needed = force_count
+        log.info("强制生成 %d 篇（--count 参数）", notes_needed)
+    else:
+        posts_per_week = topics_config.get("posts_per_week", 7)
+        notes_needed = max(0, posts_per_week - len(pending_titles))
+        if notes_needed == 0:
+            log.info("待发布库存充足（%d 篇），本次不生成新内容", len(pending_titles))
+            return
     log.info("需要生成 %d 篇新内容", notes_needed)
 
     # 选定主题
@@ -554,4 +561,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--count", type=int, default=0,
+                        help="强制生成指定篇数（忽略库存检查）")
+    args = parser.parse_args()
+    main(force_count=args.count if args.count > 0 else None)
