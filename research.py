@@ -444,6 +444,25 @@ version: v1.0
         return None
 
     raw_title = title_match.group(1).strip()
+
+    # 计算正文字数（去掉 frontmatter、标题行、标签行、分隔线）
+    body = article
+    body = re.sub(r'^---\n.*?\n---\n', '', body, count=1, flags=re.DOTALL)  # frontmatter
+    body = re.sub(r'^#\s+.+\n', '', body, count=1, flags=re.MULTILINE)      # 标题行
+    body = re.sub(r'^\*标签：.+\*$', '', body, flags=re.MULTILINE)           # 标签行
+    body = re.sub(r'^\*版本：.+\*$', '', body, flags=re.MULTILINE)           # 版本行
+    body = re.sub(r'^---+$', '', body, flags=re.MULTILINE)                   # 分隔线
+    word_count = len(re.sub(r'\s+', '', body))
+
+    # 在 frontmatter 中插入 word_count
+    article = re.sub(
+        r'^(---\ntags:.*?\ndate:.*?\nversion:.*?)\n---',
+        rf'\1\nword_count: {word_count}\n---',
+        article,
+        count=1,
+        flags=re.DOTALL,
+    )
+
     # 清理标题中的特殊字符，用于文件名
     safe_title = re.sub(r'[/\\:*?"<>|]', '', raw_title)
     safe_title = re.sub(r'\s+', '', safe_title)[:30]
