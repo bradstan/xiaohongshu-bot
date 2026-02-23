@@ -2,6 +2,9 @@
 # 定时任务入口：启动 MCP → 执行发布脚本
 set -e
 
+# cron 环境没有用户 PATH，手动补上 Homebrew（node/yt-dlp 等依赖）
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 LOG="$HOME/xiaohongshu-mcp/publish.log"
 echo "" >> "$LOG"
 echo "========================================" >> "$LOG"

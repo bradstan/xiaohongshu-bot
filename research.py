@@ -8,6 +8,7 @@
 """
 
 import json
+import os
 import re
 import sys
 import logging
@@ -17,6 +18,10 @@ from pathlib import Path
 from typing import Optional, List
 import urllib.request
 import urllib.error
+
+# cron 环境没有用户 PATH，确保 Homebrew 路径可用（node/yt-dlp 等依赖）
+if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
 
 # ─── 配置 ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR    = Path("/Users/jarvis/xiaohongshu-mcp")
