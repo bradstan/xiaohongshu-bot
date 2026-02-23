@@ -255,56 +255,67 @@ def check_mcp_alive() -> bool:
 
 
 # ─── 发布后搜索 feed_id ────────────────────────────────────────────────────────
+MY_USER_ID = "54808b57d6e4a9616b300900"
+
+
+def _parse_feeds_response(result: dict) -> list:
+    """从 MCP 响应中解析 feeds 列表"""
+    text = ""
+    inner = result.get("result", {}).get("content", [])
+    if inner:
+        text = inner[0].get("text", "")
+    try:
+        feeds_data = json.loads(text)
+    except Exception:
+        feeds_data = result.get("result", {})
+    if isinstance(feeds_data, dict):
+        return feeds_data.get("feeds", []) or feeds_data.get("items", [])
+    elif isinstance(feeds_data, list):
+        return feeds_data
+    return []
+
+
+def _match_feed(feeds: list, title: str) -> tuple[str, str]:
+    """从 feeds 列表中匹配标题，优先匹配自己的笔记"""
+    clean_title = re.sub(r'\s+', '', title)
+    # 第一轮：标题匹配 + 是自己发的
+    for feed in feeds:
+        nc = feed.get("noteCard", {})
+        dt = re.sub(r'\s+', '', nc.get("displayTitle", ""))
+        uid = nc.get("user", {}).get("userId", "")
+        if uid == MY_USER_ID and (dt == clean_title or clean_title in dt or dt in clean_title):
+            fid = feed.get("id", "")
+            tok = feed.get("xsecToken", "")
+            if fid:
+                log.info("找到 feed_id: %s (自己的笔记)", fid)
+                return fid, tok
+    # 第二轮：标题模糊匹配（不限用户）
+    for feed in feeds:
+        nc = feed.get("noteCard", {})
+        dt = re.sub(r'\s+', '', nc.get("displayTitle", ""))
+        if clean_title in dt or dt in clean_title:
+            fid = feed.get("id", "")
+            tok = feed.get("xsecToken", "")
+            if fid:
+                log.info("找到 feed_id（模糊匹配）: %s", fid)
+                return fid, tok
+    return "", ""
+
+
 def find_feed_id(title: str) -> tuple[str, str]:
     """
     发布成功后搜索自己的文章，获取 feed_id 和 xsec_token。
+    策略：用标题前 10 字搜索（短关键词更快），匹配时优先过滤自己的 userId。
     返回 (feed_id, xsec_token)，失败返回 ("", "")
     """
+    keyword = title[:10]
     try:
-        # 不限范围搜索，标题匹配 + userId 过滤自己的帖子
-        result = call_tool("search_feeds", {"keyword": title})
-        text = ""
-        if "result" in result:
-            inner = result["result"].get("content", [])
-            if inner:
-                text = inner[0].get("text", "")
-
-        try:
-            feeds_data = json.loads(text)
-        except Exception:
-            feeds_data = result.get("result", {})
-
-        feeds = []
-        if isinstance(feeds_data, dict):
-            feeds = feeds_data.get("feeds", []) or feeds_data.get("items", [])
-        elif isinstance(feeds_data, list):
-            feeds = feeds_data
-
-        clean_title = re.sub(r'\s+', '', title)
-        # 第一轮：标题完全匹配 + 是自己发的（userId 一致）
-        for feed in feeds:
-            note_card = feed.get("noteCard", {})
-            display_title = re.sub(r'\s+', '', note_card.get("displayTitle", ""))
-            user_id = note_card.get("user", {}).get("userId", "")
-            if display_title == clean_title and user_id:
-                feed_id = feed.get("id", "")
-                xsec_token = feed.get("xsecToken", "")
-                if feed_id:
-                    log.info("找到 feed_id: %s (userId=%s)", feed_id, user_id)
-                    return feed_id, xsec_token
-
-        # 第二轮：标题包含匹配（兜底）
-        for feed in feeds:
-            note_card = feed.get("noteCard", {})
-            display_title = re.sub(r'\s+', '', note_card.get("displayTitle", ""))
-            if clean_title in display_title or display_title in clean_title:
-                feed_id = feed.get("id", "")
-                xsec_token = feed.get("xsecToken", "")
-                if feed_id:
-                    log.info("找到 feed_id（模糊匹配）: %s", feed_id)
-                    return feed_id, xsec_token
-
-        log.warning("未找到匹配的 feed，标题: %s", title)
+        result = call_tool("search_feeds", {"keyword": keyword})
+        feeds = _parse_feeds_response(result)
+        fid, tok = _match_feed(feeds, title)
+        if fid:
+            return fid, tok
+        log.warning("未找到匹配的 feed，关键词: %s", keyword)
         return "", ""
     except Exception as e:
         log.warning("搜索 feed_id 失败: %s", e)
@@ -381,9 +392,9 @@ def main() -> None:
     success = publish_article(article, index=published_count)
 
     if success:
-        # 等待一下再搜索（让小红书索引生效）
+        # 等待让小红书索引生效后再搜索 feed_id
         import time
-        time.sleep(8)
+        time.sleep(15)
         feed_id, xsec_token = find_feed_id(article["title"])
 
         entry = {
