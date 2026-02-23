@@ -178,8 +178,19 @@ def get_pending_articles(state: dict) -> list[Path]:
     """返回尚未发布的文章，按文件名排序"""
     published_files = {e["file"] for e in state["published"]}
     all_md = sorted(VAULT_DIR.glob("*.md"))
+    # macOS TCC 可能让 glob 在 launchd/cron 下静默返回空，用 os.listdir 兜底
+    if not all_md and VAULT_DIR.exists():
+        import os
+        try:
+            all_md = sorted(
+                VAULT_DIR / f for f in os.listdir(str(VAULT_DIR)) if f.endswith(".md")
+            )
+            if all_md:
+                log.warning("glob 返回空但 os.listdir 找到 %d 个文件（疑似 TCC 权限问题）", len(all_md))
+        except Exception as e:
+            log.warning("os.listdir 也失败: %s", e)
     log.info("待发布目录: %s (exists=%s)", VAULT_DIR, VAULT_DIR.exists())
-    log.info("glob *.md 找到 %d 个文件, 已发布 %d 篇", len(all_md), len(published_files))
+    log.info("找到 %d 个 md 文件, 已发布 %d 篇", len(all_md), len(published_files))
     pending = [p for p in all_md if str(p) not in published_files]
     if not pending and all_md:
         log.info("所有文件均已在 published.json 中")
