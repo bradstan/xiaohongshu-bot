@@ -33,7 +33,6 @@ LOG_FILE    = SCRIPT_DIR / "feedback.log"
 REVIEW_DIR  = Path("/Users/jarvis/Documents/小红书/已发布/复盘")
 MCP_URL     = "http://localhost:18060/mcp"
 MCP_ACCEPT  = "application/json, text/event-stream"
-CLAUDE_BIN  = "/Users/jarvis/.npm-global/bin/claude"
 
 CHECKPOINTS = [
     (30,   "30分钟"),
@@ -351,21 +350,8 @@ def retry_find_feed_id(entry: dict) -> tuple[str, str]:
     return "", ""
 
 
-# ─── Claude CLI 调用 ─────────────────────────────────────────────────────────
-def call_claude(prompt: str) -> Optional[str]:
-    """调用 Claude CLI 生成文本"""
-    try:
-        result = subprocess.run(
-            [CLAUDE_BIN, "--print", "--max-turns", "1", "-p", prompt],
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode != 0:
-            log.warning("Claude CLI 错误: %s", result.stderr[:200])
-            return None
-        return result.stdout.strip()
-    except Exception as e:
-        log.warning("Claude CLI 调用失败: %s", e)
-        return None
+# ─── LLM 调用（统一模块） ────────────────────────────────────────────────────
+from llm import call_llm
 
 
 # ─── 复盘文件生成 ─────────────────────────────────────────────────────────────
@@ -472,7 +458,26 @@ def update_review(state: dict, now: datetime) -> Path:
 
     detail_str = "\n\n".join(detail_sections)
 
-    # ── 组装复盘文件（数据部分）──
+    # ── 组装复盘文件 ──
+    # 如果文件已存在且含 AI 分析，保留三、四部分
+    ai_section = """## 三、优化建议
+
+> *(待AI分析...)*
+
+---
+
+## 四、下一篇写作方向
+
+> *(待AI分析...)*"""
+
+    if review_file.exists():
+        old_text = review_file.read_text(encoding="utf-8")
+        # 提取已有的 AI 分析内容（从 ## 三 到 自动生成之前）
+        m = re.search(r'(## 三、优化建议.*?)(?=\n---\n\n\*自动生成)', old_text, re.DOTALL)
+        if m and "*(待AI分析...)*" not in m.group(1):
+            ai_section = m.group(1).rstrip()
+            log.info("保留已有 AI 分析内容")
+
     content = f"""# {now.strftime('%Y-%m-%d')}｜已发内容复盘
 
 > 统计周期：{week_start} ~ {week_end}
@@ -494,15 +499,7 @@ def update_review(state: dict, now: datetime) -> Path:
 
 ---
 
-## 三、优化建议
-
-> *(待AI分析...)*
-
----
-
-## 四、下一篇写作方向
-
-> *(待AI分析...)*
+{ai_section}
 
 ---
 
@@ -580,7 +577,7 @@ def generate_analysis(state: dict, review_file: Path, now: datetime) -> None:
 请直接输出 Markdown 格式内容，不要有前后说明文字。"""
 
     log.info("调用 Claude 生成分析报告...")
-    analysis = call_claude(prompt)
+    analysis = call_llm(prompt)
     if not analysis:
         log.warning("AI 分析生成失败")
         return

@@ -31,7 +31,7 @@ LOG_FILE      = SCRIPT_DIR / "research.log"
 PUBLISH_DIR   = Path("/Users/jarvis/Documents/小红书/待发布")
 MCP_URL       = "http://localhost:18060/mcp"
 MCP_ACCEPT    = "application/json, text/event-stream"
-CLAUDE_BIN    = "/Users/jarvis/.npm-global/bin/claude"
+# Claude CLI 已迁移到 llm.py 统一模块
 
 # ─── 日志 ─────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -386,27 +386,13 @@ def fetch_market_context(theme: dict) -> dict:
     return context
 
 
-# ─── Claude CLI 调用 ──────────────────────────────────────────────────────────
+# ─── LLM 调用（统一模块） ────────────────────────────────────────────────────
+from llm import call_llm
+
+
 def call_claude(prompt: str, max_tokens: int = 4096) -> Optional[str]:
-    """调用 claude CLI 的 --print 模式生成文本"""
-    try:
-        result = subprocess.run(
-            [CLAUDE_BIN, "--print", "--max-turns", "1"],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        if result.returncode != 0:
-            log.warning("Claude CLI 错误: %s", result.stderr[:500])
-            return None
-        return result.stdout.strip()
-    except subprocess.TimeoutExpired:
-        log.warning("Claude CLI 超时")
-        return None
-    except Exception as e:
-        log.warning("Claude CLI 调用失败: %s", e)
-        return None
+    """调用 LLM 生成文本（兼容旧接口名）"""
+    return call_llm(prompt, max_tokens=max_tokens)
 
 
 # ─── 选题决策 ─────────────────────────────────────────────────────────────────
