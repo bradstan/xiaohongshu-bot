@@ -431,16 +431,6 @@ def main() -> None:
         save_state(state)
         log.info("✓ 文件已移动并重命名: %s", Path(marked_dest).name)
 
-        # 同步到 Obsidian vault（~/Documents/小红书/已发布/）
-        import shutil
-        obsidian_published = Path.home() / "Documents" / "小红书" / "已发布"
-        try:
-            obsidian_published.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(marked_dest, obsidian_published / Path(marked_dest).name)
-            log.info("✓ 已同步到 Obsidian: %s", obsidian_published)
-        except Exception as e:
-            log.warning("同步到 Obsidian 失败（不影响发布）: %s", e)
-
         log.info("  feed_id: %s", feed_id or "（未找到，稍后 feedback.py 可重试）")
         log.info("已发布 %d 篇，剩余 %d 篇", len(state["published"]), len(pending) - 1)
     else:
