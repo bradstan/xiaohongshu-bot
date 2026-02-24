@@ -25,7 +25,7 @@ from mark_published import mark_file
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR = Path("/Users/jarvis/xiaohongshu-mcp")
-VAULT_DIR  = Path("/Users/jarvis/Documents/小红书/待发布")
+VAULT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp/vault/待发布")
 STATE_FILE = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE   = SCRIPT_DIR / "publish.log"
@@ -35,6 +35,7 @@ MCP_ACCEPT = "application/json, text/event-stream"
 # ─── 日志 ────────────────────────────────────────────────────────────────────
 log = logging.getLogger("publish")
 log.setLevel(logging.INFO)
+log.propagate = False
 if not log.handlers:
     _fmt = logging.Formatter("%(asctime)s  %(levelname)s  %(message)s")
     _fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
@@ -410,7 +411,7 @@ def main() -> None:
         save_state(state)
 
         # 移动文件到「已发布」文件夹
-        published_dir = Path("/Users/jarvis/Documents/小红书/已发布")
+        published_dir = Path("/Users/jarvis/xiaohongshu-mcp/vault/已发布")
         published_dir.mkdir(parents=True, exist_ok=True)
         dest = published_dir / target.name
         target.rename(dest)

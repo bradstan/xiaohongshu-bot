@@ -21,3 +21,4 @@ __pycache__/
 # 系统 / 运行时
 .DS_Store
 mcp.pid
+vault/

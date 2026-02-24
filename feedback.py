@@ -30,7 +30,7 @@ SCRIPT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp")
 STATE_FILE  = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE    = SCRIPT_DIR / "feedback.log"
-REVIEW_DIR  = Path("/Users/jarvis/Documents/小红书/已发布/复盘")
+REVIEW_DIR  = Path("/Users/jarvis/xiaohongshu-mcp/vault/已发布/复盘")
 MCP_URL     = "http://localhost:18060/mcp"
 MCP_ACCEPT  = "application/json, text/event-stream"
 
