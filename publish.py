@@ -146,8 +146,18 @@ def parse_article(path: Path) -> dict:
     if not tags:
         tags = re.findall(r'#([\w\u4e00-\u9fff]+)', content)
 
-    # 去掉正文末尾的 hashtag 行（避免发布到小红书正文里）
-    content_no_tags = re.sub(r'\n+#[\w\u4e00-\u9fff#\s]+$', '', content).strip()
+    # 去掉正文末尾的元数据（标签行、版本行、hashtag 行）
+    # 匹配：*标签：#xxx*、*版本：v1.0*、裸 #tag 行、⚠️免责声明、尾部 ---
+    content_no_tags = re.sub(
+        r'[\n\s]*(?:\*?标签[：:].*|\*?版本[：:].*|\*?[Vv]ersion[：:].*'
+        r'|#[\w\u4e00-\u9fff#\s]+)\s*$',
+        '', content, flags=re.DOTALL
+    ).strip()
+    # 去掉尾部残留的 --- 分隔线和免责声明
+    content_no_tags = re.sub(
+        r'[\n\s]*---[\n\s]*(?:⚠️.*)?[\n\s]*(?:---[\n\s]*)?$',
+        '', content_no_tags
+    ).strip()
     if len(content_no_tags) > 1000:
         content_no_tags = content_no_tags[:997] + "..."
 
