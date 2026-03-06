@@ -28,7 +28,7 @@ sleep 1
 
 # 启动（必须在 xiaohongshu-mcp 目录下运行，否则找不到 cookies.json）
 echo "$(date): 启动 MCP server..." >> "$LOG"
-cd "$HOME/xiaohongshu-mcp" && "$MCP_BIN" -headless=true >> "$LOG" 2>&1 &
+cd "$HOME/xiaohongshu-mcp" && "$MCP_BIN" -headless=true -bin "$HOME/xiaohongshu-mcp/chrome-wrapper.sh" >> "$LOG" 2>&1 &
 echo $! > "$PID_FILE"
 echo "$(date): MCP server 已启动 (PID=$(cat $PID_FILE))" >> "$LOG"
 

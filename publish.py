@@ -90,6 +90,8 @@ def parse_article(path: Path) -> dict:
 
     # ── 1. 解析 YAML frontmatter ────────────────────────────────────────────
     tags: list[str] = []
+    theme_id = ""
+    category = ""
     body_start = 0  # 正文从哪一行开始
 
     if lines and lines[0].strip() == "---":
@@ -105,6 +107,13 @@ def parse_article(path: Path) -> dict:
             tags_match = re.search(r'^tags:\s*\[([^\]]+)\]', fm_text, re.MULTILINE)
             if tags_match:
                 tags = [t.strip() for t in tags_match.group(1).split(",") if t.strip()]
+            # 提取 theme_id 和 category（用于精准发布统计）
+            tm = re.search(r'^theme_id:\s*(\S+)', fm_text, re.MULTILINE)
+            if tm:
+                theme_id = tm.group(1).strip()
+            cm = re.search(r'^category:\s*(\S+)', fm_text, re.MULTILINE)
+            if cm:
+                category = cm.group(1).strip()
             body_start = end_fm + 1
 
     # ── 2. 提取标题（第一个 H1，去掉「已发」前缀）─────────────────────────
@@ -167,22 +176,29 @@ def parse_article(path: Path) -> dict:
         "full_content": content,
         "tags": list(dict.fromkeys(tags)),
         "file": str(path),
+        "theme_id": theme_id,
+        "category": category,
     }
 
 
-def infer_theme_id(title: str) -> str:
-    """根据标题关键词匹配 topics.json 中的 theme"""
+def get_article_category(path: Path) -> str:
+    """从文章 frontmatter 中读取 category（不全文解析，快速读取）"""
     try:
-        if TOPICS_FILE.exists():
-            with TOPICS_FILE.open(encoding="utf-8") as f:
-                topics = json.load(f)
-            for theme in topics.get("themes", []):
-                for kw in theme.get("keywords", []):
-                    if kw.lower() in title.lower():
-                        return theme["id"]
+        text = path.read_text(encoding="utf-8")
+        m = re.search(r'^category:\s*(\S+)', text, re.MULTILINE)
+        return m.group(1).strip() if m else ""
     except Exception:
-        pass
-    return "unknown"
+        return ""
+
+
+def get_today_published_categories(state: dict) -> list[str]:
+    """获取今日已发布文章的 category 列表（按发布时间顺序）"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    return [
+        e.get("category", "")
+        for e in state.get("published", [])
+        if e.get("published_at", "").startswith(today)
+    ]
 
 
 def get_pending_articles(state: dict) -> list[Path]:
@@ -336,11 +352,12 @@ def find_feed_id(title: str) -> tuple[str, str]:
 # ─── 发布文章 ─────────────────────────────────────────────────────────────────
 def publish_article(article: dict, index: int = 0) -> bool:
     try:
-        # 生成封面图（传入 full_content 用于提取要点）
+        # 生成封面图（传入 category 选择模板，full_content 用于提取要点）
         cover_path = generate_cover(
             article["title"],
             content=article.get("full_content", article["content"]),
             index=index,
+            category=article.get("category", "options"),
         )
         log.info("封面图: %s", cover_path)
 
@@ -361,10 +378,16 @@ def publish_article(article: dict, index: int = 0) -> bool:
 
         res_content = result.get("result", {})
         if isinstance(res_content, dict):
+            # 检查 isError 标志
+            if res_content.get("isError"):
+                inner = res_content.get("content", [])
+                text = inner[0].get("text", "") if inner else ""
+                log.error("发布失败 (isError=true): %s", text[:200])
+                return False
             inner = res_content.get("content", [])
             if isinstance(inner, list) and inner:
                 text = inner[0].get("text", "")
-                if "error" in text.lower() and "成功" not in text:
+                if ("error" in text.lower() or "失败" in text) and "成功" not in text:
                     log.error("发布可能失败: %s", text[:200])
                     return False
         return True
@@ -391,7 +414,19 @@ def main() -> None:
         log.info("所有文章已发布完毕，无待发布内容")
         return
 
-    target = pending[0]
+    # ── 1+1 分类均衡：优先选与今日上一篇不同 category 的文章 ──────────────
+    today_cats = get_today_published_categories(state)
+    last_cat = today_cats[-1] if today_cats else ""
+    target = None
+    if last_cat:
+        for p in pending:
+            cat = get_article_category(p)
+            if cat and cat != last_cat:
+                target = p
+                log.info("分类均衡：今日已发 [%s]，选 [%s] 文章", last_cat, cat)
+                break
+    if target is None:
+        target = pending[0]
     log.info("准备发布: %s", target.name)
 
     article = parse_article(target)
@@ -411,7 +446,8 @@ def main() -> None:
         entry = {
             "file": str(target),
             "title": article["title"],
-            "theme_id": infer_theme_id(article["title"]),
+            "theme_id": article.get("theme_id") or "unknown",
+            "category": article.get("category") or "",
             "published_at": datetime.now().isoformat(timespec="seconds"),
             "feed_id": feed_id,
             "xsec_token": xsec_token,

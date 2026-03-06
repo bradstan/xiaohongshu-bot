@@ -30,7 +30,7 @@ SCRIPT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp")
 STATE_FILE  = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE    = SCRIPT_DIR / "feedback.log"
-REVIEW_DIR  = Path("/Users/jarvis/xiaohongshu-mcp/vault/已发布/复盘")
+PUBLISHED_DIR = Path("/Users/jarvis/xiaohongshu-mcp/vault/已发布")
 MCP_URL     = "http://localhost:18060/mcp"
 MCP_ACCEPT  = "application/json, text/event-stream"
 
@@ -354,242 +354,213 @@ def retry_find_feed_id(entry: dict) -> tuple[str, str]:
 from llm import call_llm
 
 
-# ─── 复盘文件生成 ─────────────────────────────────────────────────────────────
-def build_data_summary(entries: list) -> str:
-    """将所有已发文章的 checkpoint 数据格式化为分析用文本"""
-    sections = []
-    for e in entries:
-        cp = e.get("checkpoints", {})
-        title = e.get("title", "?")
-        theme = e.get("theme_id", "unknown")
-        pub_date = e.get("published_at", "")[:16]
-
-        rows = []
-        for label in ["30分钟", "1小时", "3小时", "6小时", "24小时"]:
-            if label in cp:
-                d = cp[label]
-                rows.append(f"  {label}: 点赞{d.get('liked',0)} 收藏{d.get('collected',0)} "
-                            f"评论{d.get('comment',0)} 分享{d.get('shared',0)}")
-
-        # 计算增长趋势
-        early = cp.get("30分钟", {})
-        latest = {}
-        for label in ["24小时", "6小时", "3小时", "1小时"]:
-            if label in cp:
-                latest = cp[label]
-                break
-        growth = ""
-        if early and latest:
-            delta_c = latest.get("collected", 0) - early.get("collected", 0)
-            delta_l = latest.get("liked", 0) - early.get("liked", 0)
-            growth = f"  增长趋势: 收藏+{delta_c} 点赞+{delta_l}"
-
-        section = f"📄 {title}\n  主题: {theme} | 发布: {pub_date}\n"
-        section += "\n".join(rows)
-        if growth:
-            section += "\n" + growth
-        sections.append(section)
-
-    return "\n\n".join(sections)
+# ─── 逐篇复盘（写入文章自身页面顶部）─────────────────────────────────────────
+REVIEW_MARKER = "<!-- 复盘数据 -->"
+REVIEW_END    = "<!-- /复盘数据 -->"
 
 
-def update_review(state: dict, now: datetime) -> Path:
-    """根据 published.json 里的最新数据，自动生成/更新当周复盘文件"""
-    REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+def _build_article_review(entry: dict, now: datetime) -> str:
+    """为单篇文章生成复盘区块（Markdown），将嵌入文章顶部"""
+    cp = entry.get("checkpoints", {})
+    title = entry.get("title", "?")
+    pub_date = entry.get("published_at", "")[:16]
 
-    week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
-    week_end   = (now - timedelta(days=now.weekday()) + timedelta(days=6)).strftime("%Y-%m-%d")
-    review_file = REVIEW_DIR / f"{now.strftime('%Y-%m-%d')}｜已发内容复盘.md"
+    rows = []
+    for label in ["30分钟", "1小时", "3小时", "6小时", "24小时"]:
+        if label in cp:
+            d = cp[label]
+            rows.append(
+                f"| {label} | {d.get('liked',0)} | {d.get('collected',0)} "
+                f"| {d.get('comment',0)} | {d.get('shared',0)} |"
+            )
+    if not rows:
+        return ""
 
-    entries = [
-        e for e in state["published"]
-        if e.get("published_at") and e.get("checkpoints")
-    ]
-
-    if not entries:
-        return review_file
-
-    # ── 汇总数据表 ──
-    summary_rows = []
-    for e in entries:
-        cp = e.get("checkpoints", {})
-        latest = {}
-        for label in ["24小时", "6小时", "3小时", "1小时", "30分钟"]:
-            if label in cp:
-                latest = cp[label]
-                break
-        title_short = e.get("title", "?")[:20]
-        pub_date = e.get("published_at", "")[:10]
-        theme = e.get("theme_id", "?")
-        liked     = latest.get("liked", "-")
-        collected = latest.get("collected", "-")
-        comment   = latest.get("comment", "-")
-        summary_rows.append(
-            f"| {pub_date} | {title_short} | {theme} | {liked} | {collected} | {comment} |"
-        )
-
-    summary_table = (
-        "| 发布日期 | 标题 | 主题 | 点赞 | 收藏 | 评论 |\n"
-        "|----------|------|------|------|------|------|\n"
-        + "\n".join(summary_rows)
+    table = (
+        "| 时间点 | 点赞 | 收藏 | 评论 | 分享 |\n"
+        "|--------|------|------|------|------|\n"
+        + "\n".join(rows)
     )
 
-    # ── 各文章详细趋势 ──
-    detail_sections = []
-    for e in entries:
-        cp = e.get("checkpoints", {})
-        title = e.get("title", "?")
-        pub_date = e.get("published_at", "")[:10]
-        rows = []
-        for label in ["30分钟", "1小时", "3小时", "6小时", "24小时"]:
-            if label in cp:
-                d = cp[label]
-                rows.append(
-                    f"| {label} | {d.get('liked',0)} | {d.get('collected',0)} | {d.get('comment',0)} | {d.get('shared',0)} |"
-                )
-        if not rows:
-            continue
-        table = (
-            "| 时间点 | 点赞 | 收藏 | 评论 | 分享 |\n"
-            "|--------|------|------|------|------|\n"
-            + "\n".join(rows)
+    latest = {}
+    for label in ["24小时", "6小时", "3小时", "1小时", "30分钟"]:
+        if label in cp:
+            latest = cp[label]
+            break
+
+    return f"""{REVIEW_MARKER}
+> 📊 **互动数据** | 更新于 {now.strftime('%Y-%m-%d %H:%M')}
+
+{table}
+
+> **AI 复盘**：*(待分析...)*
+
+{REVIEW_END}"""
+
+
+def write_review_to_article(entry: dict, now: datetime) -> None:
+    """将复盘区块写入文章页面顶部（frontmatter 之后、正文之前）"""
+    md_path = Path(entry.get("file", ""))
+    if not md_path.exists():
+        return
+
+    cp = entry.get("checkpoints", {})
+    if not cp:
+        return
+
+    text = md_path.read_text(encoding="utf-8")
+    review_block = _build_article_review(entry, now)
+    if not review_block:
+        return
+
+    # 如果已有复盘区块，替换它（保留已有 AI 分析）
+    if REVIEW_MARKER in text:
+        old_match = re.search(
+            rf'{re.escape(REVIEW_MARKER)}.*?{re.escape(REVIEW_END)}',
+            text, re.DOTALL
         )
-        detail_sections.append(f"### 📄 {title}\n\n> 发布时间：{pub_date}\n\n{table}")
+        if old_match:
+            old_block = old_match.group()
+            # 保留已有的 AI 复盘内容（非占位符）
+            ai_match = re.search(r'> \*\*AI 复盘\*\*：(.*?)(?=\n\n<!--)', old_block, re.DOTALL)
+            if ai_match and "*(待分析...)*" not in ai_match.group(1):
+                existing_ai = ai_match.group(1).strip()
+                review_block = review_block.replace("*(待分析...)*", existing_ai)
+            text = text.replace(old_block, review_block)
+    else:
+        # 插入到 frontmatter 之后
+        lines = text.split("\n")
+        insert_idx = 0
+        if lines and lines[0].strip() == "---":
+            for i in range(1, len(lines)):
+                if lines[i].strip() == "---":
+                    insert_idx = i + 1
+                    break
+        # 跳过紧跟的空行
+        while insert_idx < len(lines) and lines[insert_idx].strip() == "":
+            insert_idx += 1
+        lines.insert(insert_idx, review_block + "\n")
+        text = "\n".join(lines)
 
-    detail_str = "\n\n".join(detail_sections)
-
-    # ── 组装复盘文件 ──
-    # 如果文件已存在且含 AI 分析，保留三、四部分
-    ai_section = """## 三、优化建议
-
-> *(待AI分析...)*
-
----
-
-## 四、下一篇写作方向
-
-> *(待AI分析...)*"""
-
-    if review_file.exists():
-        old_text = review_file.read_text(encoding="utf-8")
-        # 提取已有的 AI 分析内容（从 ## 三 到 自动生成之前）
-        m = re.search(r'(## 三、优化建议.*?)(?=\n---\n\n\*自动生成)', old_text, re.DOTALL)
-        if m and "*(待AI分析...)*" not in m.group(1):
-            ai_section = m.group(1).rstrip()
-            log.info("保留已有 AI 分析内容")
-
-    content = f"""# {now.strftime('%Y-%m-%d')}｜已发内容复盘
-
-> 统计周期：{week_start} ~ {week_end}
-> 最后更新：{now.strftime('%Y-%m-%d %H:%M')}
-
----
-
-## 一、数据概况
-
-共发布 **{len(entries)}** 篇内容。
-
-{summary_table}
-
----
-
-## 二、各文章互动趋势
-
-{detail_str}
-
----
-
-{ai_section}
-
----
-
-*自动生成 @ {now.strftime('%Y-%m-%d %H:%M')}*
-"""
-
-    review_file.write_text(content, encoding="utf-8")
-    log.info("复盘文件已更新: %s", review_file.name)
-    return review_file
+    md_path.write_text(text, encoding="utf-8")
+    log.info("复盘数据已写入: %s", md_path.name)
 
 
-# ─── AI 自动分析 ──────────────────────────────────────────────────────────────
-def generate_analysis(state: dict, review_file: Path, now: datetime) -> None:
-    """
-    调用 Claude CLI 生成优化建议和写作方向，替换复盘文件中的占位符。
-    频率控制：每天最多生成一次（通过检查文件内容判断）。
-    前置条件：至少有 1 篇文章有 6h+ checkpoint 数据。
-    """
-    if not review_file.exists():
+def generate_article_analysis(entry: dict) -> None:
+    """为单篇文章生成 AI 复盘分析，替换页面中的占位符"""
+    md_path = Path(entry.get("file", ""))
+    if not md_path.exists():
         return
 
-    text = review_file.read_text(encoding="utf-8")
+    text = md_path.read_text(encoding="utf-8")
+    if "*(待分析...)*" not in text:
+        return  # 已有分析或无占位符
 
-    # 如果已经有 AI 分析内容（不是占位符），跳过
-    if "*(待AI分析...)*" not in text:
-        log.info("复盘文件已有分析内容，跳过 AI 生成")
+    # 需要至少 6h 数据才生成分析
+    cp = entry.get("checkpoints", {})
+    if not any(label in cp for label in ["6小时", "24小时"]):
         return
 
-    # 检查是否有足够数据
-    entries_with_data = [
-        e for e in state["published"]
-        if any(label in e.get("checkpoints", {})
-               for label in ["6小时", "24小时"])
-    ]
-    if not entries_with_data:
-        log.info("暂无足够 checkpoint 数据（需 6h+），跳过 AI 分析")
-        return
+    title = entry.get("title", "?")
+    rows = []
+    for label in ["30分钟", "1小时", "3小时", "6小时", "24小时"]:
+        if label in cp:
+            d = cp[label]
+            rows.append(f"  {label}: 点赞{d.get('liked',0)} 收藏{d.get('collected',0)} "
+                        f"评论{d.get('comment',0)} 分享{d.get('shared',0)}")
 
-    # 构建分析 prompt
-    data_summary = build_data_summary(
-        [e for e in state["published"] if e.get("checkpoints")]
-    )
+    prompt = f"""你是小红书运营分析师。针对这篇文章的表现数据，用2-3句话给出精炼的复盘总结。
 
-    prompt = f"""你是小红书运营数据分析师。根据以下已发布内容的互动数据，生成分析和优化建议。
+标题：{title}
+数据：
+{chr(10).join(rows)}
 
-## 已发布内容数据
+要求：
+- 用1-2句话点评数据表现（好/差在哪）
+- 用1句话给出最关键的优化建议
+- 总共不超过80字
+- 直接输出文字，不要标题或格式"""
 
-{data_summary}
-
-## 分析要求
-
-请生成以下两个章节的完整 Markdown 内容：
-
-### 三、优化建议
-
-分析每篇文章的表现，给出具体可执行的优化建议：
-1. **标题优化**（2条）：针对表现差的文章，给出标题改写建议（原文 → 优化后）
-2. **开头3行优化**（2条）：给出更抓人的开头写法
-3. **结构优化**（2条）：内容结构如何改进（如加行动清单、反面案例等）
-4. **互动引导优化**：如何提高评论率
-
-### 四、下一篇写作方向
-
-基于数据分析，给出具体的下一篇写作指令：
-- 推荐主题和标题（2-3个备选）
-- 为什么选这个方向（数据依据）
-- 内容结构建议
-- 标签建议
-
-注意：
-- 我们是**期权知识科普**账号，不写真实市场数据，用假设场景举例
-- 收藏率高 = 干货属性强，应多出这类内容
-- 评论数 = 互动性强，需加强互动引导
-
-请直接输出 Markdown 格式内容，不要有前后说明文字。"""
-
-    log.info("调用 Claude 生成分析报告...")
-    analysis = call_llm(prompt)
+    log.info("为 [%s] 生成 AI 复盘...", title[:15])
+    analysis = call_llm(prompt, max_tokens=200)
     if not analysis:
-        log.warning("AI 分析生成失败")
         return
 
-    # 替换占位符
-    text = text.replace(
-        "## 三、优化建议\n\n> *(待AI分析...)*\n\n---\n\n## 四、下一篇写作方向\n\n> *(待AI分析...)*",
-        analysis
-    )
+    # 清理：取第一段，限制长度
+    analysis = analysis.strip().split("\n\n")[0].strip()
+    if len(analysis) > 150:
+        analysis = analysis[:147] + "..."
 
-    review_file.write_text(text, encoding="utf-8")
-    log.info("AI 分析已写入复盘文件")
+    text = text.replace("*(待分析...)*", analysis, 1)
+    md_path.write_text(text, encoding="utf-8")
+
+    # 改 emoji：✅ → 📊
+    new_name = md_path.name.replace("✅", "📊", 1)
+    if new_name != md_path.name:
+        new_path = md_path.parent / new_name
+        md_path.rename(new_path)
+        entry["file"] = str(new_path)
+        log.info("复盘完成，已重命名: %s", new_name)
+
+
+# ─── 主题权重更新 ─────────────────────────────────────────────────────────────
+THEME_WEIGHTS_FILE = SCRIPT_DIR / "state" / "theme_weights.json"
+
+
+def update_theme_weights(state: dict) -> None:
+    """
+    根据已发布文章的互动数据（最新 checkpoint）计算每个主题的综合得分，
+    归一化后写入 state/theme_weights.json。
+    research.py 的 pick_themes() 读取此文件打散同库存主题的顺序。
+
+    得分公式：score = collected * 3 + liked * 1 + comment * 2 + shared * 2
+    （收藏权重最高，因为代表内容质量；评论/分享代表传播力）
+    """
+    CHECKPOINT_ORDER = ["24小时", "6小时", "3小时", "1小时", "30分钟"]
+
+    theme_scores: dict = {}   # theme_id -> list of scores
+    for entry in state.get("published", []):
+        tid = entry.get("theme_id", "unknown")
+        if tid == "unknown":
+            continue
+        cp = entry.get("checkpoints", {})
+        if not cp:
+            continue
+        # 取最新时间点数据
+        latest = {}
+        for label in CHECKPOINT_ORDER:
+            if label in cp:
+                latest = cp[label]
+                break
+        if not latest:
+            continue
+        score = (latest.get("collected", 0) * 3 +
+                 latest.get("liked",     0) * 1 +
+                 latest.get("comment",   0) * 2 +
+                 latest.get("shared",    0) * 2)
+        theme_scores.setdefault(tid, []).append(score)
+
+    if not theme_scores:
+        return
+
+    # 每个主题取平均分
+    avg_scores = {tid: sum(scores) / len(scores)
+                  for tid, scores in theme_scores.items()}
+
+    # 归一化到 [0.5, 2.0]（保证低分主题仍有机会被选到）
+    max_s = max(avg_scores.values()) or 1.0
+    weights = {tid: round(0.5 + (s / max_s) * 1.5, 3)
+               for tid, s in avg_scores.items()}
+
+    THEME_WEIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    THEME_WEIGHTS_FILE.write_text(
+        json.dumps({"updated": datetime.now().strftime("%Y-%m-%d"),
+                    "weights": weights}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    log.info("theme_weights.json 已更新：%s",
+             " | ".join(f"{tid}={w}" for tid, w in sorted(weights.items(),
+                                                           key=lambda x: -x[1])))
 
 
 # ─── 主流程 ───────────────────────────────────────────────────────────────────
@@ -656,9 +627,27 @@ def main() -> None:
     else:
         log.info("无需更新")
 
-    # 更新复盘文件 + AI 分析
-    review_file = update_review(state, now)
-    generate_analysis(state, review_file, now)
+    # 逐篇写入复盘数据 + AI 分析
+    review_changed = False
+    for entry in state["published"]:
+        cp = entry.get("checkpoints", {})
+        if not cp:
+            continue
+        write_review_to_article(entry, now)
+        old_file = entry.get("file", "")
+        generate_article_analysis(entry)
+        if entry.get("file", "") != old_file:
+            review_changed = True  # AI 分析重命名了文件
+
+    # 仅在 AI 分析重命名了文件时才需要再次保存
+    if review_changed:
+        save_state(state)
+        log.info("文件重命名后状态已同步")
+
+    # 更新主题权重（供 research.py pick_themes() 参考）
+    update_theme_weights(state)
+
+    log.info("=" * 50)
 
 
 if __name__ == "__main__":
