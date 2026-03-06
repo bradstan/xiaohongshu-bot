@@ -167,8 +167,8 @@ def parse_article(path: Path) -> dict:
         r'[\n\s]*---[\n\s]*(?:⚠️.*)?[\n\s]*(?:---[\n\s]*)?$',
         '', content_no_tags
     ).strip()
-    if len(content_no_tags) > 1000:
-        content_no_tags = content_no_tags[:997] + "..."
+    if len(content_no_tags) > 950:
+        content_no_tags = content_no_tags[:947] + "..."
 
     return {
         "title": title,
@@ -256,7 +256,7 @@ def get_session() -> str:
     return sid
 
 
-def mcp_call(method: str, params: dict, req_id: int = 2) -> dict:
+def mcp_call(method: str, params: dict, req_id: int = 2, timeout: int = 90) -> dict:
     sid = get_session()
     payload = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}).encode()
     req = urllib.request.Request(
@@ -264,12 +264,12 @@ def mcp_call(method: str, params: dict, req_id: int = 2) -> dict:
         headers={"Content-Type": "application/json", "Accept": MCP_ACCEPT, "mcp-session-id": sid},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode())
 
 
-def call_tool(tool_name: str, arguments: dict) -> dict:
-    return mcp_call("tools/call", {"name": tool_name, "arguments": arguments})
+def call_tool(tool_name: str, arguments: dict, timeout: int = 90) -> dict:
+    return mcp_call("tools/call", {"name": tool_name, "arguments": arguments}, timeout=timeout)
 
 
 def check_mcp_alive() -> bool:
@@ -369,7 +369,7 @@ def publish_article(article: dict, index: int = 0) -> bool:
         if article.get("tags"):
             args["tags"] = article["tags"][:10]  # 最多10个
 
-        result = call_tool("publish_content", args)
+        result = call_tool("publish_content", args, timeout=150)
         log.info("publish_content 响应: %s", json.dumps(result, ensure_ascii=False))
 
         if "error" in result:
