@@ -24,11 +24,11 @@ if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
     os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
 
 # ─── 配置 ─────────────────────────────────────────────────────────────────────
-SCRIPT_DIR    = Path("/Users/jarvis/xiaohongshu-mcp")
+SCRIPT_DIR    = Path(__file__).parent
 TOPICS_FILE   = SCRIPT_DIR / "topics.json"
 STATE_FILE    = SCRIPT_DIR / "published.json"
 LOG_FILE      = SCRIPT_DIR / "research.log"
-PUBLISH_DIR   = Path("/Users/jarvis/xiaohongshu-mcp/vault/待发布")
+PUBLISH_DIR   = SCRIPT_DIR / "vault" / "待发布"
 MCP_URL       = "http://localhost:18060/mcp"
 MCP_ACCEPT    = "application/json, text/event-stream"
 # Claude CLI 已迁移到 llm.py 统一模块
@@ -147,7 +147,7 @@ def analyze_past_performance(state: dict) -> dict:
 
 def load_latest_review() -> str:
     """读取最新复盘文件的优化建议部分，供 Claude 参考"""
-    review_dir = Path("/Users/jarvis/xiaohongshu-mcp/vault/已发布/复盘")
+    review_dir = SCRIPT_DIR / "vault" / "已发布" / "复盘"
     if not review_dir.exists():
         return ""
     reviews = sorted(review_dir.glob("*复盘.md"), reverse=True)

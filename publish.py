@@ -18,14 +18,20 @@ from typing import Optional
 import urllib.request
 import urllib.error
 
-# 封面图生成
+# 封面图生成（可选，PIL 不可用时跳过）
 sys.path.insert(0, str(Path(__file__).parent))
-from make_cover import generate_cover
+try:
+    from make_cover import generate_cover
+    COVER_AVAILABLE = True
+except ImportError:
+    COVER_AVAILABLE = False
+    def generate_cover(title: str, content: str = "", index: int = 0) -> str:
+        return ""
 from mark_published import mark_file
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-SCRIPT_DIR = Path("/Users/jarvis/xiaohongshu-mcp")
-VAULT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp/vault/待发布")
+SCRIPT_DIR = Path(__file__).parent
+VAULT_DIR  = SCRIPT_DIR / "vault" / "待发布"
 STATE_FILE = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE   = SCRIPT_DIR / "publish.log"
@@ -337,22 +343,27 @@ def find_feed_id(title: str) -> tuple[str, str]:
 def publish_article(article: dict, index: int = 0) -> bool:
     try:
         # 生成封面图（传入 full_content 用于提取要点）
-        cover_path = generate_cover(
-            article["title"],
-            content=article.get("full_content", article["content"]),
-            index=index,
-        )
-        log.info("封面图: %s", cover_path)
+        cover_path = ""
+        if COVER_AVAILABLE:
+            cover_path = generate_cover(
+                article["title"],
+                content=article.get("full_content", article["content"]),
+                index=index,
+            )
+            log.info("封面图: %s", cover_path)
+        else:
+            log.warning("PIL 未安装，跳过封面图生成，无图发布")
 
         args = {
             "title": article["title"],
             "content": article["content"],
-            "images": [cover_path],
         }
+        if cover_path:
+            args["images"] = [cover_path]
         if article.get("tags"):
             args["tags"] = article["tags"][:10]  # 最多10个
 
-        result = call_tool("publish_content", args)
+        result = call_tool("publish_content", args)  # type: ignore
         log.info("publish_content 响应: %s", json.dumps(result, ensure_ascii=False))
 
         if "error" in result:
@@ -378,9 +389,11 @@ def publish_article(article: dict, index: int = 0) -> bool:
 def main() -> None:
     log.info("=" * 60)
     log.info("定时发布任务启动 @ %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    if not COVER_AVAILABLE:
+        log.warning("PIL/Pillow 未安装，将以无封面图模式发布。安装方式: pip install Pillow")
 
     if not check_mcp_alive():
-        log.error("MCP server 未运行，请先启动: ~/xiaohongshu-mcp/xiaohongshu-mcp-darwin-arm64")
+        log.error("MCP server 未运行，请先执行: bash %s/start_mcp.sh", SCRIPT_DIR)
         sys.exit(1)
     log.info("MCP server 连接正常")
 
@@ -421,7 +434,7 @@ def main() -> None:
         save_state(state)
 
         # 移动文件到「已发布」文件夹
-        published_dir = Path("/Users/jarvis/xiaohongshu-mcp/vault/已发布")
+        published_dir = SCRIPT_DIR / "vault" / "已发布"
         published_dir.mkdir(parents=True, exist_ok=True)
         dest = published_dir / target.name
         target.rename(dest)

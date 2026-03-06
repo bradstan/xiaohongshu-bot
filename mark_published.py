@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 
-STATE_FILE = Path("/Users/jarvis/xiaohongshu-mcp/published.json")
+STATE_FILE = Path(__file__).parent / "published.json"
 MARK_PREFIX = "✅"
 
 

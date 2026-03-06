@@ -11,11 +11,36 @@ import textwrap
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-COVER_DIR = Path("/Users/jarvis/xiaohongshu-mcp/covers")
+COVER_DIR = Path(__file__).parent / "covers"
 COVER_DIR.mkdir(exist_ok=True)
 
-FONT_BOLD  = "/System/Library/Fonts/STHeiti Medium.ttc"
-FONT_LIGHT = "/System/Library/Fonts/STHeiti Light.ttc"
+# CJK fonts: try system fonts in order
+def _find_cjk_font() -> str:
+    candidates = [
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+    ]
+    for p in candidates:
+        if Path(p).exists():
+            return p
+    return ""
+
+def _find_cjk_font_light() -> str:
+    candidates = [
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+        "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+    ]
+    for p in candidates:
+        if Path(p).exists():
+            return p
+    return ""
+
+FONT_BOLD  = _find_cjk_font()
+FONT_LIGHT = _find_cjk_font_light()
 
 W, H = 1080, 1440
 

@@ -26,11 +26,11 @@ if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
     os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-SCRIPT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp")
+SCRIPT_DIR  = Path(__file__).parent
 STATE_FILE  = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE    = SCRIPT_DIR / "feedback.log"
-REVIEW_DIR  = Path("/Users/jarvis/xiaohongshu-mcp/vault/已发布/复盘")
+REVIEW_DIR  = SCRIPT_DIR / "vault" / "已发布" / "复盘"
 MCP_URL     = "http://localhost:18060/mcp"
 MCP_ACCEPT  = "application/json, text/event-stream"
 
