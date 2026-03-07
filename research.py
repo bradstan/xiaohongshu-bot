@@ -322,27 +322,56 @@ def search_web(query: str, max_results: int = 5) -> List[dict]:
         return []
 
 
+OPTIONS_THEME_IDS = {
+    "options_basics", "greeks_explained", "strategy_playbook",
+    "leaps_guide", "risk_and_mindset", "options_vs_stocks", "earnings_and_events",
+}
+
+
 def fetch_market_context(theme: dict) -> dict:
     """
-    搜集与主题相关的最新市场数据：
-    1. TSLA 当前股价 + 最新新闻（多轮搜索，至少20条）
-    2. Reddit/X 上的热门讨论（多轮搜索，至少20条）
-    返回结构化的上下文信息
+    搜集与主题相关的最新市场数据（多轮搜索，至少20条）。
+    根据主题类型动态调整搜索策略：期权类用 TSLA 举例，其他主题用通用投资关键词。
     """
     context = {"news": [], "reddit": [], "price_info": ""}
 
     keywords = theme.get("keywords", [])
     main_kw = keywords[0] if keywords else theme.get("name", "")
+    theme_id = theme.get("id", "")
     year = datetime.now().strftime('%Y')
     month = datetime.now().strftime('%Y-%m')
 
-    # 1. 最新新闻（多轮搜索，不同角度，合计 20 条）
-    news_queries = [
-        f"Tesla TSLA {main_kw} latest news today {year}",
-        f"TSLA options market {main_kw} {year}",
-        f"Tesla stock analysis {main_kw} this week {year}",
-        f"TSLA earnings outlook {main_kw} {year}",
-    ]
+    is_options = theme_id in OPTIONS_THEME_IDS
+
+    if is_options:
+        news_queries = [
+            f"Tesla TSLA {main_kw} latest news today {year}",
+            f"TSLA options market {main_kw} {year}",
+            f"Tesla stock analysis {main_kw} this week {year}",
+            f"TSLA earnings outlook {main_kw} {year}",
+        ]
+        reddit_queries = [
+            f"site:reddit.com Tesla TSLA options {main_kw} {month}",
+            f"site:reddit.com TSLA call put strategy {month}",
+            f"site:reddit.com r/options TSLA {main_kw} {year}",
+            f"site:reddit.com r/wallstreetbets TSLA {year}",
+        ]
+        price_query = "TSLA Tesla stock price today"
+    else:
+        news_queries = [
+            f"{main_kw} US stock market {year}",
+            f"{main_kw} investing guide beginner {year}",
+            f"美股 {main_kw} 教程 {year}",
+            f"{main_kw} personal finance strategy {year}",
+        ]
+        reddit_queries = [
+            f"site:reddit.com {main_kw} investing {month}",
+            f"site:reddit.com r/investing {main_kw} {year}",
+            f"site:reddit.com r/personalfinance {main_kw} {year}",
+            f"site:reddit.com r/stocks {main_kw} {year}",
+        ]
+        price_query = f"{main_kw} US market overview today"
+
     all_news = []
     seen_urls = set()
     for q in news_queries:
@@ -356,13 +385,6 @@ def fetch_market_context(theme: dict) -> dict:
     context["news"] = all_news[:20]
     log.info("  Web 新闻 %d 条", len(context["news"]))
 
-    # 2. Reddit 讨论（多轮搜索，合计 20 条）
-    reddit_queries = [
-        f"site:reddit.com Tesla TSLA options {main_kw} {month}",
-        f"site:reddit.com TSLA call put strategy {month}",
-        f"site:reddit.com r/options TSLA {main_kw} {year}",
-        f"site:reddit.com r/wallstreetbets TSLA {year}",
-    ]
     all_reddit = []
     seen_reddit_urls = set()
     for q in reddit_queries:
@@ -377,11 +399,10 @@ def fetch_market_context(theme: dict) -> dict:
     context["reddit"] = all_reddit[:20]
     log.info("  Reddit 参考 %d 条", len(context["reddit"]))
 
-    # 3. 当前股价
-    price_results = search_web("TSLA Tesla stock price today", max_results=3)
+    price_results = search_web(price_query, max_results=3)
     if price_results:
         context["price_info"] = price_results[0].get("content", "")[:500]
-    log.info("  股价数据: %s", "已获取" if context["price_info"] else "未获取")
+    log.info("  市场数据: %s", "已获取" if context["price_info"] else "未获取")
 
     return context
 
@@ -469,17 +490,27 @@ def generate_article(theme: dict, ref_text: str,
     if review_insights:
         review_section = f"\n## 上一轮复盘的优化建议（重点参考！）\n{review_insights}\n"
 
-    prompt = f"""你是一个小红书期权知识科普创作专家。请根据以下信息，创作一篇完整的小红书笔记。
+    is_options_theme = theme.get("id", "") in OPTIONS_THEME_IDS
+    if is_options_theme:
+        expert_role = "小红书美股期权知识科普创作专家"
+        core_positioning = "**期权知识科普**账号，文章目的是**教会读者一个期权概念或策略**"
+        example_hint = "- 可以用TSLA、AAPL、NVDA等热门股票**举例说明概念**，但不要写它们的真实价格"
+    else:
+        expert_role = "小红书美股投资知识科普创作专家"
+        core_positioning = "**美股投资知识科普**账号，文章目的是**帮助读者理解一个投资概念、工具或策略**"
+        example_hint = "- 可以用VOO、QQQ、AAPL、MSFT等知名产品或股票**举例说明概念**，但不要写它们的真实价格或涨跌幅"
+
+    prompt = f"""你是一个{expert_role}。请根据以下信息，创作一篇完整的小红书笔记。
 
 ## ⚠️ 核心定位：知识科普
 
-这是一个**期权知识科普**账号，不是财经资讯账号。文章目的是**教会读者一个期权概念或策略**。
+这是一个{core_positioning}。
 
 ### 数据使用规则（极其重要！）
 - **禁止引用任何真实的市场数据**：不写真实股价、真实财报数字、真实涨跌幅
 - **禁止引用真实事件作为论据**：不写"XX日财报显示..."、"上周XX消息..."
-- 举例时用**假设场景**：「假设某只股票当前价格100美元...」「假设你看好某只科技股...」
-- 可以用TSLA、AAPL、NVDA等热门股票**举例说明概念**，但不要写它们的真实价格
+- 举例时用**假设场景**：「假设某只股票当前价格100美元...」「假设你每月定投500美元...」
+{example_hint}
 - 举例的数字要**合理但明确是假设**：用整数（如100美元、50美元），避免写得像真实数据（如411.82美元）
 
 ### 合规红线
