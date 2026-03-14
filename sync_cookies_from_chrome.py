@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
 sync_cookies_from_chrome.py
-将 Chrome 里的小红书 Cookie 同步到 cookies.json，延长 MCP server 登录状态。
+将 Chrome 里的期权账号（wick123）Cookie 同步到 cookies.json，延长 MCP server 登录状态。
+
+账号绑定：
+  - 此脚本专用于【期权账号（wick123）】，Chrome Profile 5
+  - 宇宙能量账号（SS心灵疗愈所）的 cookie 同步由 sync_cookies_yuzhou.py 负责（Chrome Profile 4）
 
 原理：
   - 每次通过 browser-login.sh 登录后，cookies.json 包含最新 session
-  - 用户在 Chrome（Profile 4）中正常浏览小红书时，Chrome 会刷新 token
+  - 用户在 Chrome（Profile 5）中正常浏览小红书时，Chrome 会刷新 token
   - 本脚本比较两者的 web_session 新鲜度，仅在 Chrome 有更新的 session 时才同步
   - 若 cookies.json 更新（如刚刚手动登录），则跳过同步，保留现有 cookies
 
-建议每天运行一次（已配置 launchd job）。
+建议每天运行一次（已配置 launchd job，03:00）。
 """
 
 import json
@@ -34,9 +38,11 @@ import pycookiecheat  # noqa: E402 (available after venv re-exec)
 SCRIPT_DIR   = Path("/Users/jarvis/xiaohongshu-mcp")
 COOKIES_FILE = SCRIPT_DIR / "cookies.json"
 
-# Chrome profile 路径（Profile 4 有小红书 cookie）
+# Chrome profile 路径
+# Profile 4 = badstan → 宇宙能量账号（SS心灵疗愈所），由 sync_cookies_yuzhou.py 处理
+# Profile 5 = 期权账号（wick123），由本脚本处理
 CHROME_BASE = Path("~/Library/Application Support/Google/Chrome").expanduser()
-CANDIDATE_PROFILES = ["Profile 4", "Profile 6", "Default", "Profile 1", "Profile 2", "Profile 3"]
+CANDIDATE_PROFILES = ["Profile 5", "Profile 6", "Default", "Profile 1", "Profile 2", "Profile 3"]
 
 # 如果 cookies.json 在这个秒数内刚刚被写入（browser-login 后），跳过同步
 SKIP_IF_COOKIES_NEWER_THAN = 12 * 3600  # 12 小时
@@ -180,7 +186,7 @@ def main() -> None:
         cookies_age = (time.time() - COOKIES_FILE.stat().st_mtime) / 3600 if COOKIES_FILE.exists() else float("inf")
         print(f"  cookies.json 年龄：{cookies_age:.1f}h，Chrome web_session 年龄：{chrome_age_h:.1f}h")
 
-        if chrome_age > cookies_age * 1.1:  # Chrome 比 cookies.json 旧 10% 以上
+        if chrome_age_h > cookies_age * 1.1:  # Chrome 比 cookies.json 旧 10% 以上（单位统一为小时）
             print(f"⏭️  Chrome cookies ({chrome_age_h:.1f}h) 比现有 cookies.json ({cookies_age:.1f}h) 更旧，跳过同步")
             return
     except FileNotFoundError as e:

@@ -29,8 +29,16 @@ VAULT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp/vault/待发布")
 STATE_FILE = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE   = SCRIPT_DIR / "publish.log"
+COOKIES_FILE = SCRIPT_DIR / "cookies.json"
 MCP_URL    = "http://localhost:18060/mcp"
 MCP_ACCEPT = "application/json, text/event-stream"
+
+# ─── 账号安全校验 ──────────────────────────────────────────────────────────────
+# 此脚本绑定【期权账号：wick123】
+# Chrome Profile 5，customerClientId = 587244277451011
+# 若 cookies.json 对应账号不匹配，拒绝发布，避免错发到宇宙能量账号（SS心灵疗愈所）
+EXPECTED_ACCOUNT_NAME       = "wick123"
+EXPECTED_CUSTOMER_CLIENT_ID = "587244277451011"
 
 # ─── 日志 ────────────────────────────────────────────────────────────────────
 log = logging.getLogger("publish")
@@ -272,6 +280,30 @@ def call_tool(tool_name: str, arguments: dict, timeout: int = 90) -> dict:
     return mcp_call("tools/call", {"name": tool_name, "arguments": arguments}, timeout=timeout)
 
 
+def check_account_identity() -> bool:
+    """发布前核实：cookies.json 必须对应期权账号（wick123）。"""
+    try:
+        with open(COOKIES_FILE, encoding="utf-8") as f:
+            cookies = json.load(f)
+        for c in cookies:
+            if c.get("name") == "customerClientId":
+                actual_id = c.get("value", "")
+                if actual_id == EXPECTED_CUSTOMER_CLIENT_ID:
+                    log.info("✅ 账号核实通过：%s (customerClientId=%s)",
+                             EXPECTED_ACCOUNT_NAME, actual_id)
+                    return True
+                else:
+                    log.error("❌ 账号核实失败！期望 %s (id=%s)，实际 id=%s",
+                              EXPECTED_ACCOUNT_NAME, EXPECTED_CUSTOMER_CLIENT_ID, actual_id)
+                    log.error("请重新登录期权账号：bash ~/xiaohongshu-mcp/browser-login.sh")
+                    return False
+        log.error("❌ 未找到 customerClientId cookie，请重新登录期权账号")
+        return False
+    except Exception as e:
+        log.error("❌ 账号核实异常: %s", e)
+        return False
+
+
 def check_mcp_alive() -> bool:
     try:
         get_session()
@@ -401,6 +433,9 @@ def publish_article(article: dict, index: int = 0) -> bool:
 def main() -> None:
     log.info("=" * 60)
     log.info("定时发布任务启动 @ %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    if not check_account_identity():
+        sys.exit(1)
 
     if not check_mcp_alive():
         log.error("MCP server 未运行，请先启动: ~/xiaohongshu-mcp/xiaohongshu-mcp-darwin-arm64")

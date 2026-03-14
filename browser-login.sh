@@ -1,16 +1,18 @@
 #!/bin/bash
-# 浏览器登录小红书（替代二维码登录）
+# 期权账号登录脚本（wick123，端口 18060）
 # 用法：bash browser-login.sh
-# 说明：小红书已更改登录流程，需要浏览器登录（可能需要扫码两次）
+# Chrome Profile: Profile 5 —— 专用于 wick123
+# 注意：SS心灵疗愈所（宇宙能量账号）使用 Profile 4，见 ~/xiaohongshu-yuzhou/browser-login.sh
 
 set -e
 
 DIR="$HOME/xiaohongshu-mcp"
 LOGIN_BIN="$DIR/xiaohongshu-login-darwin-arm64"
-CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# 使用 Profile 5 专用 wrapper（固定 Chrome Profile，防止串号）
+CHROME_WRAPPER="$DIR/chrome-wrapper-profile5.sh"
 
-echo "🌐 启动浏览器登录..."
-echo "📌 请在弹出的 Chrome 窗口中完成小红书登录"
+echo "🌐 启动浏览器登录 —— 【wick123·期权】账号..."
+echo "📌 Chrome 将以 Profile 5 打开，请登录【wick123】（非 SS心灵疗愈所！）"
 echo "   （如需扫码，可能需要扫两次）"
 echo ""
 
@@ -22,7 +24,7 @@ fi
 
 # 启动浏览器登录（前台运行，完成后自动退出）
 cd "$DIR"
-"$LOGIN_BIN" -bin "$CHROME"
+"$LOGIN_BIN" -bin "$CHROME_WRAPPER"
 
 echo ""
 echo "✅ 登录完成，正在重启 MCP server..."
