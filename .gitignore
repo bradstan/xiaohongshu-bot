@@ -22,3 +22,5 @@
 **/*.tar.gz
 # Backup files
 **/cookies.json.fresh_backup
+# System files
+.DS_Store
