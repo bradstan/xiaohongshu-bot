@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jarvis.yuzhou-mcp-server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jarvis/xiaohongshu-bot/xhs-energy/xiaohongshu-mcp-darwin-arm64</string>
+        <string>-port</string>
+        <string>:18061</string>
+        <string>-headless=true</string>
+        <string>-bin</string>
+        <string>/Users/jarvis/xiaohongshu-bot/xhs-energy/chrome-wrapper.sh</string>
+    </array>
+
+    <!-- MCP server 常驻，崩溃后自动重启 -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-energy/logs/mcp-server.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-energy/logs/mcp-server.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/jarvis</string>
+    </dict>
+
+    <!-- 必须在 yuzhou 目录下运行，否则找不到 cookies.json -->
+    <key>WorkingDirectory</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-energy</string>
+</dict>
+</plist>

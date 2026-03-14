@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jarvis.yuzhou-publish-daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/jarvis/xiaohongshu-bot/xhs-energy/run_publish.sh</string>
+    </array>
+
+    <!-- 发布时间：每天 20:00（与 wick123 的 19:00 错开一小时）-->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>20</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-energy/logs/publish-daily.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-energy/logs/publish-daily.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/sbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/jarvis</string>
+    </dict>
+</dict>
+</plist>

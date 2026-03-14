@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jarvis.xhs-translate-daily</string>
+
+    <!-- 08:30 翻译今日扫描结果 → 写入待发布/，赶上 09:30 发布窗口 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>cd /Users/jarvis/xiaohongshu-bot/xhs-option &amp;&amp; /usr/bin/python3 pipeline/track_b/translator.py</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-option/logs/translate-daily.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-option/logs/translate-daily.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/Users/jarvis/.local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/jarvis</string>
+    </dict>
+</dict>
+</plist>

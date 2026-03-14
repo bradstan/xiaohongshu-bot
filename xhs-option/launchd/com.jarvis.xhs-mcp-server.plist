@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jarvis.xhs-mcp-server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jarvis/xiaohongshu-bot/xhs-option/xiaohongshu-bot/xhs-option-darwin-arm64</string>
+        <string>-headless=true</string>
+    </array>
+
+    <!-- MCP server 必须常驻，崩溃后自动重启 -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-option/logs/mcp-server.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-option/logs/mcp-server.err</string>
+
+    <!-- launchd 环境没有用户 PATH，必须显式设置 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/jarvis</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jarvis/xiaohongshu-bot/xhs-option</string>
+</dict>
+</plist>

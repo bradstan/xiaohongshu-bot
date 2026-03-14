@@ -1,0 +1,24 @@
+# Runtime files - never commit
+**/cookies.json
+**/cookies.json.bak*
+**/published.json
+**/mcp.pid
+**/mcp-server.log
+**/publish.log
+**/feedback.log
+**/research.log
+**/*.log
+**/venv/
+**/covers/*.jpg
+**/covers/*.png
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/state/
+**/logs/
+# Binaries (large, platform-specific)
+**/xiaohongshu-mcp-darwin-arm64
+**/xiaohongshu-login-darwin-arm64
+**/*.tar.gz
+# Backup files
+**/cookies.json.fresh_backup
