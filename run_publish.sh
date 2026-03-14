@@ -3,7 +3,7 @@
 set -e
 
 # launchd/cron 环境没有用户 PATH，手动补上 Homebrew（node/yt-dlp 等依赖）
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/usr/sbin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # 1. 确保 MCP server 运行
 bash "$HOME/xiaohongshu-mcp/start_mcp.sh"

@@ -6,22 +6,121 @@
 支持平台：
 - 小红书（MCP server）
 - YouTube（字幕提取）
-- Reddit（r/options 等）
+- Twitter/X（agent-reach）
+- Reddit（agent-reach，fallback Tavily）
 - RSS（期权博客/公众号）
 - Web（Tavily 通用搜索）
 """
 
 import json
+import os
 import re
+import subprocess
 import logging
 import urllib.request
-import urllib.error
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict
 from dataclasses import dataclass, asdict
 
 log = logging.getLogger(__name__)
+
+# ─── agent-reach CLI ──────────────────────────────────────────────────────────
+AGENT_REACH_BIN = "/Users/jarvis/.local/bin/agent-reach"
+_AR_ENV = {
+    **os.environ,
+    "PATH": "/opt/homebrew/bin:/usr/local/bin:/Users/jarvis/.local/bin:" + os.environ.get("PATH", ""),
+}
+
+
+def _cleanup_rod_chromium() -> None:
+    """强制清理 agent-reach (rod) 遗留的 Chromium 僵尸进程。"""
+    try:
+        subprocess.run(
+            ["pkill", "-9", "-f", "rod/browser/chromium"],
+            capture_output=True, timeout=5,
+        )
+    except Exception:
+        pass
+
+
+def _agent_reach_search(subcommand: str, query: str, timeout: int = 30) -> list:
+    """
+    调用 agent-reach <subcommand> <query>，解析编号列表输出为 dict 列表。
+    支持 search-twitter / search-reddit / search-xhs / search-youtube 等。
+    search-xhs 使用 rod 驱动 Chromium，调用前后均清理僵尸进程。
+    """
+    is_xhs = (subcommand == "search-xhs")
+    if is_xhs:
+        _cleanup_rod_chromium()
+    try:
+        result = subprocess.run(
+            [AGENT_REACH_BIN, subcommand, query],
+            capture_output=True, text=True, timeout=timeout, env=_AR_ENV,
+        )
+        if result.returncode != 0:
+            log.warning("agent-reach %s 失败: %s", subcommand, result.stderr[:200])
+            return []
+        return _parse_ar_output(result.stdout)
+    except subprocess.TimeoutExpired:
+        log.warning("agent-reach %s 超时: %s", subcommand, query)
+        return []
+    except FileNotFoundError:
+        log.warning("agent-reach 未找到，跳过 %s", subcommand)
+        return []
+    except Exception as e:
+        log.warning("agent-reach %s 异常: %s", subcommand, e)
+        return []
+    finally:
+        if is_xhs:
+            _cleanup_rod_chromium()
+
+
+def _parse_ar_output(text: str) -> list:
+    """
+    解析 agent-reach 的编号列表输出，格式示例：
+      1. 标题
+         🔗 https://...
+         👤 作者 · ❤ 132
+         正文摘要...
+    """
+    items = []
+    entries = re.split(r'\n(?=\d+\. )', text.strip())
+    for entry in entries:
+        lines = [l.strip() for l in entry.strip().split('\n') if l.strip()]
+        if not lines:
+            continue
+        title_m = re.match(r'^\d+\.\s+(.+)$', lines[0])
+        title = title_m.group(1) if title_m else lines[0]
+
+        url, author, engagement, content_parts = "", "", 0, []
+        for line in lines[1:]:
+            if line.startswith('🔗'):
+                url = line.replace('🔗', '').strip()
+            elif line.startswith('👤'):
+                parts = re.split(r'·', line.replace('👤', ''))
+                author = parts[0].strip()
+                for p in parts[1:]:
+                    m = re.search(r'([\d,]+)', p)
+                    if m:
+                        try:
+                            engagement = max(engagement, int(m.group(1).replace(',', '')))
+                        except ValueError:
+                            pass
+            elif line.startswith('⏱') or line.startswith('👁'):
+                pass  # YouTube 时长/播放量已在 👤 行处理
+            else:
+                content_parts.append(line)
+
+        items.append({
+            "title": title,
+            "url": url,
+            "author": author,
+            "engagement": engagement,
+            "content": " ".join(content_parts),
+        })
+    return items
+
 
 # ─── 统一素材格式 ────────────────────────────────────────────────────────────
 @dataclass
@@ -39,124 +138,38 @@ class Material:
         return asdict(self)
 
 
-# ─── MCP 工具（小红书复用） ──────────────────────────────────────────────────
-MCP_URL    = "http://localhost:18060/mcp"
-MCP_ACCEPT = "application/json, text/event-stream"
-_session_id: Optional[str] = None
-
-
-def _get_mcp_session() -> str:
-    global _session_id
-    if _session_id:
-        return _session_id
-    payload = json.dumps({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05", "capabilities": {},
-            "clientInfo": {"name": "collector", "version": "1.0"},
-        },
-    }).encode()
-    req = urllib.request.Request(
-        MCP_URL, data=payload,
-        headers={"Content-Type": "application/json", "Accept": MCP_ACCEPT},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        sid = resp.headers.get("mcp-session-id", "")
-        resp.read()
-    if not sid:
-        raise RuntimeError("MCP server 未返回 session ID")
-    _session_id = sid
-    return sid
-
-
-def _mcp_call(method: str, params: dict, req_id: int = 2) -> dict:
-    sid = _get_mcp_session()
-    payload = json.dumps({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}).encode()
-    req = urllib.request.Request(
-        MCP_URL, data=payload,
-        headers={"Content-Type": "application/json", "Accept": MCP_ACCEPT, "mcp-session-id": sid},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode())
-
-
-def _mcp_tool(name: str, args: dict) -> dict:
-    return _mcp_call("tools/call", {"name": name, "arguments": args})
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # 采集器 1：小红书
 # ═══════════════════════════════════════════════════════════════════════════════
-def _get_xhs_content(feed_id: str, xsec_token: str) -> Optional[str]:
-    try:
-        result = _mcp_tool("get_feed_detail", {"feed_id": feed_id, "xsec_token": xsec_token})
-        note = (result.get("data", {}).get("note", {}) or
-                result.get("result", {}).get("data", {}).get("note", {}))
-        desc = note.get("desc", "")
-        return desc if desc else None
-    except Exception as e:
-        log.warning("获取小红书笔记详情失败: %s", e)
-        return None
-
-
 def collect_xiaohongshu(keywords: List[str], max_total: int = 20) -> List[Material]:
-    """多关键词 × 多排序搜索小红书，去重后返回标准化素材"""
+    """
+    多关键词搜索小红书，通过 agent-reach (mcporter) 稳定获取结果。
+    返回标题 + 互动数 + URL，不逐条拉全文（避免超时）。
+    """
     all_materials = []
-    seen_titles = set()
-    per_query = max(5, max_total // max(len(keywords) * 2, 1))
+    seen_urls = set()
 
     for kw in keywords:
-        for sort_by in ["最多收藏", "最多点赞"]:
-            try:
-                result = _mcp_tool("search_feeds", {
-                    "keyword": kw,
-                    "filters": {"sort_by": sort_by, "publish_time": "一周内"}
-                })
-                text = ""
-                inner = result.get("result", {}).get("content", [])
-                if inner:
-                    text = inner[0].get("text", "")
-                try:
-                    data = json.loads(text)
-                except Exception:
-                    data = {}
-                feeds = data.get("feeds", [])
-
-                for feed in feeds[:per_query]:
-                    note_card = feed.get("noteCard", {})
-                    title = note_card.get("displayTitle", "") or note_card.get("title", "")
-                    interact = note_card.get("interactInfo", {})
-                    feed_id = feed.get("id", "")
-                    xsec_token = feed.get("xsecToken", "")
-
-                    if not title or not feed_id:
-                        continue
-                    clean = re.sub(r'\s+', '', title)
-                    if clean in seen_titles:
-                        continue
-                    seen_titles.add(clean)
-
-                    content = _get_xhs_content(feed_id, xsec_token) or ""
-                    collected = int(str(interact.get("collectedCount", 0)).replace(",", "") or 0)
-                    liked = int(str(interact.get("likedCount", 0)).replace(",", "") or 0)
-
-                    all_materials.append(Material(
-                        title=title,
-                        content=content[:800],
-                        source="小红书",
-                        engagement=collected + liked,
-                        collected_at=datetime.now().isoformat(timespec="seconds"),
-                    ))
-
-                if len(all_materials) >= max_total:
-                    break
-            except Exception as e:
-                log.warning("小红书搜索 [%s/%s] 失败: %s", kw, sort_by, e)
-
         if len(all_materials) >= max_total:
             break
+        items = _agent_reach_search("search-xhs", kw, timeout=60)
+        for item in items:
+            url = item.get("url", "")
+            key = url or item["title"]
+            if key in seen_urls or not item["title"]:
+                continue
+            seen_urls.add(key)
+            all_materials.append(Material(
+                title=item["title"],
+                content=item.get("content", ""),
+                source="小红书",
+                url=url,
+                author=item.get("author", ""),
+                engagement=item.get("engagement", 0),
+                collected_at=datetime.now().isoformat(timespec="seconds"),
+            ))
+            if len(all_materials) >= max_total:
+                break
 
     all_materials.sort(key=lambda m: m.engagement, reverse=True)
     return all_materials[:max_total]
@@ -302,32 +315,75 @@ def _tavily_search(query: str, max_results: int = 10) -> List[dict]:
 
 
 def collect_reddit(keywords: List[str], max_total: int = 20) -> List[Material]:
-    """从 Reddit 期权相关 subreddit 搜索高质量讨论帖"""
-    subreddits = ["r/options", "r/thetagang", "r/wallstreetbets", "r/investing"]
+    """从 Reddit 期权相关 subreddit 搜索高质量讨论帖（agent-reach 优先，Tavily 兜底）"""
     materials = []
     seen_urls = set()
 
-    for kw in keywords:
-        for sub in subreddits:
-            if len(materials) >= max_total:
-                break
-            query = f"site:reddit.com {sub} {kw}"
-            results = _tavily_search(query, max_results=5)
-            for item in results:
-                url = item.get("url", "")
-                if url in seen_urls or not url:
-                    continue
-                seen_urls.add(url)
-                materials.append(Material(
-                    title=item.get("title", ""),
-                    content=item.get("content", "")[:800],
-                    source="Reddit",
-                    url=url,
-                    engagement=0,  # Tavily 不返回 score
-                    collected_at=datetime.now().isoformat(timespec="seconds"),
-                ))
+    for kw in keywords[:4]:
         if len(materials) >= max_total:
             break
+        query = f"options {kw}"
+        items = _agent_reach_search("search-reddit", query, timeout=30)
+
+        if not items:
+            # fallback: Tavily site:reddit.com
+            log.debug("Reddit agent-reach 无结果，fallback Tavily: %s", kw)
+            for sub in ["r/options", "r/thetagang"]:
+                raw = _tavily_search(f"site:reddit.com {sub} {kw}", max_results=5)
+                items += [{"title": r.get("title",""), "url": r.get("url",""),
+                           "author": "", "engagement": 0, "content": r.get("content","")[:600]}
+                          for r in raw]
+
+        for item in items:
+            url = item.get("url", "")
+            if url in seen_urls or not url:
+                continue
+            seen_urls.add(url)
+            materials.append(Material(
+                title=item["title"],
+                content=item["content"][:800],
+                source="Reddit",
+                url=url,
+                author=item.get("author", ""),
+                engagement=item.get("engagement", 0),
+                collected_at=datetime.now().isoformat(timespec="seconds"),
+            ))
+            if len(materials) >= max_total:
+                break
+
+    return materials[:max_total]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 采集器 3b：Twitter/X（agent-reach）
+# ═══════════════════════════════════════════════════════════════════════════════
+def collect_twitter(keywords: List[str], max_total: int = 20) -> List[Material]:
+    """搜索 Twitter/X 上期权相关的热门讨论（英文为主，可作为选题信号）"""
+    materials = []
+    seen_urls = set()
+
+    for kw in keywords[:4]:
+        if len(materials) >= max_total:
+            break
+        query = f"options trading {kw}" if re.search(r'[a-zA-Z]', kw) else f"{kw} options"
+        items = _agent_reach_search("search-twitter", query, timeout=30)
+
+        for item in items:
+            url = item.get("url", "")
+            if url in seen_urls or not url:
+                continue
+            seen_urls.add(url)
+            materials.append(Material(
+                title=item["title"],
+                content=item["content"][:800],
+                source="Twitter",
+                url=url,
+                author=item.get("author", ""),
+                engagement=item.get("engagement", 0),
+                collected_at=datetime.now().isoformat(timespec="seconds"),
+            ))
+            if len(materials) >= max_total:
+                break
 
     return materials[:max_total]
 
@@ -421,19 +477,28 @@ def collect_all(keywords: List[str],
                 enable_xhs: bool = True,
                 enable_youtube: bool = True,
                 enable_reddit: bool = True,
+                enable_twitter: bool = True,
                 enable_rss: bool = True,
                 enable_web: bool = True,
-                max_per_source: int = 20) -> Dict[str, List[Material]]:
+                max_per_source: int = 20,
+                source_limits: dict = None) -> Dict[str, List[Material]]:
     """
     全平台采集，返回按来源分组的素材。
-    每个来源独立采集，某个失败不影响其他。
+    source_limits 可单独覆盖各来源限额，例如：
+      {"小红书": 25, "Twitter": 30, "Reddit": 15}
+    未在 source_limits 中指定的来源使用 max_per_source。
     """
+    sl = source_limits or {}
+
+    def _lim(key: str) -> int:
+        return sl.get(key, max_per_source)
+
     result = {}
 
     if enable_xhs:
         log.info("  [小红书] 采集中...")
         try:
-            result["小红书"] = collect_xiaohongshu(keywords, max_per_source)
+            result["小红书"] = collect_xiaohongshu(keywords, _lim("小红书"))
             log.info("  [小红书] %d 条", len(result["小红书"]))
         except Exception as e:
             log.warning("  [小红书] 采集失败: %s", e)
@@ -442,8 +507,8 @@ def collect_all(keywords: List[str],
     if enable_youtube:
         log.info("  [YouTube] 采集中...")
         try:
-            yt_keywords = [f"options trading {kw}" for kw in keywords[:3]]
-            result["YouTube"] = collect_youtube(yt_keywords, max_per_source)
+            yt_kw = [f"{kw} tutorial" for kw in keywords[:3]]
+            result["YouTube"] = collect_youtube(yt_kw, _lim("YouTube"))
             log.info("  [YouTube] %d 条", len(result["YouTube"]))
         except Exception as e:
             log.warning("  [YouTube] 采集失败: %s", e)
@@ -452,16 +517,25 @@ def collect_all(keywords: List[str],
     if enable_reddit:
         log.info("  [Reddit] 采集中...")
         try:
-            result["Reddit"] = collect_reddit(keywords, max_per_source)
+            result["Reddit"] = collect_reddit(keywords, _lim("Reddit"))
             log.info("  [Reddit] %d 条", len(result["Reddit"]))
         except Exception as e:
             log.warning("  [Reddit] 采集失败: %s", e)
             result["Reddit"] = []
 
+    if enable_twitter:
+        log.info("  [Twitter] 采集中...")
+        try:
+            result["Twitter"] = collect_twitter(keywords, _lim("Twitter"))
+            log.info("  [Twitter] %d 条", len(result["Twitter"]))
+        except Exception as e:
+            log.warning("  [Twitter] 采集失败: %s", e)
+            result["Twitter"] = []
+
     if enable_rss:
         log.info("  [RSS] 采集中...")
         try:
-            result["RSS"] = collect_rss(max_total=max_per_source)
+            result["RSS"] = collect_rss(max_total=_lim("RSS"))
             log.info("  [RSS] %d 条", len(result["RSS"]))
         except Exception as e:
             log.warning("  [RSS] 采集失败: %s", e)
@@ -470,7 +544,7 @@ def collect_all(keywords: List[str],
     if enable_web:
         log.info("  [Web] 采集中...")
         try:
-            result["Web"] = collect_web(keywords, max_per_source)
+            result["Web"] = collect_web(keywords, _lim("Web"))
             log.info("  [Web] %d 条", len(result["Web"]))
         except Exception as e:
             log.warning("  [Web] 采集失败: %s", e)
@@ -479,17 +553,31 @@ def collect_all(keywords: List[str],
     total = sum(len(v) for v in result.values())
     log.info("  采集完成：共 %d 条素材（%s）", total,
              " + ".join(f"{k} {len(v)}" for k, v in result.items() if v))
+    # 兜底：确保所有 rod/Chromium 进程已退出
+    if enable_xhs:
+        _cleanup_rod_chromium()
     return result
 
 
 def materials_to_prompt_text(materials_by_source: Dict[str, List[Material]],
-                             max_per_source: int = 10) -> str:
+                             max_per_source: int = 10,
+                             source_order: list = None) -> str:
     """
     把多源素材转成 prompt 可用的文本。
-    每个来源取 top N，正文只取前 400 字。
+    source_order 指定来源展示顺序（排前的来源在 prompt 中更靠前，
+    Claude 会优先参考）。未在 source_order 中的来源追加到末尾。
     """
+    # 按 source_order 排列来源
+    all_sources = list(materials_by_source.keys())
+    if source_order:
+        ordered = [s for s in source_order if s in materials_by_source]
+        ordered += [s for s in all_sources if s not in ordered]
+    else:
+        ordered = all_sources
+
     sections = []
-    for source, materials in materials_by_source.items():
+    for source in ordered:
+        materials = materials_by_source.get(source, [])
         if not materials:
             continue
         lines = [f"\n## {source}素材（共 {len(materials)} 条，展示前 {min(len(materials), max_per_source)} 条）\n"]

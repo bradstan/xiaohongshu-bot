@@ -9,8 +9,8 @@ PORT=18060
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if kill -0 "$PID" 2>/dev/null; then
-        # 进程活着，检查端口是否可达
-        if lsof -ti:"$PORT" >/dev/null 2>&1; then
+        # 进程活着，检查端口是否可达（用 nc，不依赖 lsof）
+        if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
             echo "$(date): MCP server 已在运行 (PID=$PID)" >> "$LOG"
             exit 0
         fi
@@ -22,13 +22,13 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-# 确保端口没被占用
-lsof -ti:"$PORT" | xargs kill -9 2>/dev/null
+# 确保端口没被占用（用完整路径 /usr/sbin/lsof，兼容 launchd 受限 PATH）
+/usr/sbin/lsof -ti:"$PORT" | xargs kill -9 2>/dev/null
 sleep 1
 
 # 启动（必须在 xiaohongshu-mcp 目录下运行，否则找不到 cookies.json）
 echo "$(date): 启动 MCP server..." >> "$LOG"
-cd "$HOME/xiaohongshu-mcp" && "$MCP_BIN" -headless=true >> "$LOG" 2>&1 &
+cd "$HOME/xiaohongshu-mcp" && "$MCP_BIN" -headless=true -bin "$HOME/xiaohongshu-mcp/chrome-wrapper.sh" >> "$LOG" 2>&1 &
 echo $! > "$PID_FILE"
 echo "$(date): MCP server 已启动 (PID=$(cat $PID_FILE))" >> "$LOG"
 
