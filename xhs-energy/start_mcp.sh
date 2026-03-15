@@ -5,6 +5,12 @@ LOG="$HOME/xiaohongshu-bot/xhs-energy/mcp-server.log"
 PID_FILE="$HOME/xiaohongshu-bot/xhs-energy/mcp.pid"
 PORT=18061
 
+# 端口已可达则直接退出（兼容 launchd 管理的进程，不依赖 pid 文件）
+if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
+    echo "$(date): MCP server 已在运行 (port $PORT 可达)" >> "$LOG"
+    exit 0
+fi
+
 # 检查是否已在运行且端口可达
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
