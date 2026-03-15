@@ -161,15 +161,9 @@ def _render_yuzhou(title: str, content: str, index: int) -> Image.Image:
 
     # ── 文字叠加层 ─────────────────────────────────────────────────────────────
     if use_photo:
-        # 照片底图：底部叠渐变遮罩，让白色文字可读
+        # 照片底图：全图均匀遮罩，文字居中可读
         img_rgba = img.convert("RGBA")
-        overlay  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        odraw    = ImageDraw.Draw(overlay)
-        mask_start = int(H * 0.42)
-        for y in range(mask_start, H):
-            t = (y - mask_start) / (H - mask_start)
-            a = int(190 * (t ** 0.6))
-            odraw.line([(0, y), (W, y)], fill=(0, 0, 0, a))
+        overlay  = Image.new("RGBA", (W, H), (0, 0, 0, 100))  # ~39% 均匀遮罩
         img = Image.alpha_composite(img_rgba, overlay).convert("RGB")
         title_rgb = (255, 252, 245)   # 暖白
         brand_rgb = (220, 215, 205)   # 浅米白
@@ -192,8 +186,8 @@ def _render_yuzhou(title: str, content: str, index: int) -> Image.Image:
     lh         = _line_h(title_font, lines[0] if lines else "测") + 22
     total_h    = lh * len(lines)
 
-    # 文字区块底边固定在距底部 160px，向上延伸
-    text_y = H - 160 - total_h
+    # 文字区块垂直居中
+    text_y = (H - total_h) // 2
 
     for line in lines:
         bbox = title_font.getbbox(line)
