@@ -159,22 +159,15 @@ def _render_yuzhou(title: str, content: str, index: int) -> Image.Image:
                             int(H * cy_r) + jy,
                             radius, blob_c, alpha)
 
-    # ── 文字叠加层 ─────────────────────────────────────────────────────────────
+    # ── 文字层 ────────────────────────────────────────────────────────────────
     if use_photo:
-        # 照片底图：全图均匀遮罩，文字居中可读
-        img_rgba = img.convert("RGBA")
-        overlay  = Image.new("RGBA", (W, H), (0, 0, 0, 100))  # ~39% 均匀遮罩
-        img = Image.alpha_composite(img_rgba, overlay).convert("RGB")
         title_rgb = (255, 252, 245)   # 暖白
         brand_rgb = (220, 215, 205)   # 浅米白
     else:
-        # 纯渐变 fallback：用主题色
         title_rgb = grad_title_c
         brand_rgb = grad_sub_c
 
-    draw = ImageDraw.Draw(img)
-
-    # 标题
+    # 先算好文字布局，再画阴影背景
     clean_title = re.sub(
         r'[^\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\w\s：:·\-—()（）【】%！!？?，。、]',
         '', title
@@ -187,7 +180,28 @@ def _render_yuzhou(title: str, content: str, index: int) -> Image.Image:
     total_h    = lh * len(lines)
 
     # 文字区块垂直居中
-    text_y = (H - total_h) // 2
+    text_y0 = (H - total_h) // 2
+
+    if use_photo:
+        # 仅在文字区域叠半透明暗色背景（文字宽度 + 水平留白，高度 = 文字块）
+        pad_x, pad_y = 60, 36
+        # 计算所有行中最宽的像素宽度
+        max_lw = max(
+            title_font.getbbox(ln)[2] - title_font.getbbox(ln)[0]
+            for ln in lines
+        ) if lines else MAX_W
+        bx0 = (W - max_lw) // 2 - pad_x
+        bx1 = (W + max_lw) // 2 + pad_x
+        by0 = text_y0 - pad_y
+        by1 = text_y0 + total_h + pad_y
+
+        shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        sdraw  = ImageDraw.Draw(shadow)
+        sdraw.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 145))  # ~57% 透明
+        img = Image.alpha_composite(img.convert("RGBA"), shadow).convert("RGB")
+
+    draw   = ImageDraw.Draw(img)
+    text_y = text_y0
 
     for line in lines:
         bbox = title_font.getbbox(line)
@@ -195,11 +209,6 @@ def _render_yuzhou(title: str, content: str, index: int) -> Image.Image:
         x    = (W - lw) // 2
         draw.text((x, text_y), line, font=title_font, fill=title_rgb)
         text_y += lh
-
-    # 装饰细线
-    line_y = text_y + 18
-    draw.line([(W // 2 - 55, line_y), (W // 2 + 55, line_y)],
-              fill=title_rgb, width=2)
 
     # 品牌名（右下角）
     brand_font = _font(FONT_BRAND, 42)
