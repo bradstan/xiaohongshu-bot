@@ -3,9 +3,9 @@
 小红书封面图生成器（本地 PIL）—— 将宇宙能量账号专用
 
 模板：
-  yuzhou  — 纯底图风（无文字）
-            ① 有底图模式：照片底图，不叠文字
-            ② 纯渐变模式：柔和渐变背景（fallback，无底图时使用）
+  yuzhou  — 照片底图 + 标题文字叠加
+            ① 有底图模式：照片底图 + 底部渐变遮罩 + 思源宋体白色标题 + 品牌名
+            ② 纯渐变模式：柔和渐变背景 + 主题色文字（fallback，无底图时使用）
 
 底图放置：~/xiaohongshu-yuzhou/backgrounds/（jpg/png 均可，自动循环）
 尺寸：1080×1440（3:4 竖版）
@@ -159,7 +159,59 @@ def _render_yuzhou(title: str, content: str, index: int) -> Image.Image:
                             int(H * cy_r) + jy,
                             radius, blob_c, alpha)
 
-    # 不叠加文字，直接返回背景图
+    # ── 文字叠加层 ─────────────────────────────────────────────────────────────
+    if use_photo:
+        # 照片底图：底部叠渐变遮罩，让白色文字可读
+        img_rgba = img.convert("RGBA")
+        overlay  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        odraw    = ImageDraw.Draw(overlay)
+        mask_start = int(H * 0.42)
+        for y in range(mask_start, H):
+            t = (y - mask_start) / (H - mask_start)
+            a = int(190 * (t ** 0.6))
+            odraw.line([(0, y), (W, y)], fill=(0, 0, 0, a))
+        img = Image.alpha_composite(img_rgba, overlay).convert("RGB")
+        title_rgb = (255, 252, 245)   # 暖白
+        brand_rgb = (220, 215, 205)   # 浅米白
+    else:
+        # 纯渐变 fallback：用主题色
+        title_rgb = grad_title_c
+        brand_rgb = grad_sub_c
+
+    draw = ImageDraw.Draw(img)
+
+    # 标题
+    clean_title = re.sub(
+        r'[^\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\w\s：:·\-—()（）【】%！!？?，。、]',
+        '', title
+    )
+    fs         = 90 if len(clean_title) <= 9 else 76 if len(clean_title) <= 14 else 64
+    title_font = _font(FONT_TITLE, fs)
+    MAX_W      = W - 130
+    lines      = _pixel_wrap(clean_title, title_font, MAX_W)
+    lh         = _line_h(title_font, lines[0] if lines else "测") + 22
+    total_h    = lh * len(lines)
+
+    # 文字区块底边固定在距底部 160px，向上延伸
+    text_y = H - 160 - total_h
+
+    for line in lines:
+        bbox = title_font.getbbox(line)
+        lw   = bbox[2] - bbox[0]
+        x    = (W - lw) // 2
+        draw.text((x, text_y), line, font=title_font, fill=title_rgb)
+        text_y += lh
+
+    # 装饰细线
+    line_y = text_y + 18
+    draw.line([(W // 2 - 55, line_y), (W // 2 + 55, line_y)],
+              fill=title_rgb, width=2)
+
+    # 品牌名（右下角）
+    brand_font = _font(FONT_BRAND, 42)
+    draw.text((W - 68, H - 88), "SS心灵疗愈所",
+              font=brand_font, fill=brand_rgb)
+
     return img.convert("RGB")
 
 
