@@ -27,16 +27,15 @@ VAULT_DIR  = SCRIPT_DIR / "vault/待发布"
 STATE_FILE = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE   = SCRIPT_DIR / "publish.log"
-COOKIES_FILE = SCRIPT_DIR / "cookies.json"
 MCP_URL    = "http://localhost:18060/mcp"
 MCP_ACCEPT = "application/json, text/event-stream"
 
 # ─── 账号安全校验 ──────────────────────────────────────────────────────────────
-# 此脚本绑定【期权账号：wick123】
-# Chrome Profile 5，customerClientId = 587244277451011
-# 若 cookies.json 对应账号不匹配，拒绝发布，避免错发到宇宙能量账号（SS心灵疗愈所）
-EXPECTED_ACCOUNT_NAME       = "wick123"
-EXPECTED_CUSTOMER_CLIENT_ID = "587244277451011"
+# 此脚本绑定期权账号（Chrome Profile 5）
+# 发布前通过 MCP check_login_status 验证真实昵称，不使用 customerClientId（设备 ID，不可靠）
+import json as _json_cfg
+_acfg = _json_cfg.loads((SCRIPT_DIR.parent / "accounts.json").read_text(encoding="utf-8"))
+EXPECTED_ACCOUNT_NAME = _acfg["accounts"]["xhs-option"].get("expected_login_name", "wick123")
 
 # ─── 日志 ────────────────────────────────────────────────────────────────────
 log = logging.getLogger("publish")
@@ -274,26 +273,26 @@ def call_tool(tool_name: str, arguments: dict, timeout: int = 90) -> dict:
 
 
 def check_account_identity() -> bool:
-    """发布前核实：cookies.json 必须对应期权账号（wick123）。"""
+    """发布前核实：通过 MCP check_login_status 验证当前登录账号昵称。
+
+    ⚠️  不使用 customerClientId：该字段是设备标识符，同一台机器上两账号值相同，无法区分账号。
+        必须通过 check_login_status 拿到小红书返回的真实昵称才可信。
+    """
     try:
-        with open(COOKIES_FILE, encoding="utf-8") as f:
-            cookies = json.load(f)
-        for c in cookies:
-            if c.get("name") == "customerClientId":
-                actual_id = c.get("value", "")
-                if actual_id == EXPECTED_CUSTOMER_CLIENT_ID:
-                    log.info("✅ 账号核实通过：%s (customerClientId=%s)",
-                             EXPECTED_ACCOUNT_NAME, actual_id)
-                    return True
-                else:
-                    log.error("❌ 账号核实失败！期望 %s (id=%s)，实际 id=%s",
-                              EXPECTED_ACCOUNT_NAME, EXPECTED_CUSTOMER_CLIENT_ID, actual_id)
-                    log.error("请重新登录期权账号：bash ~/xiaohongshu-mcp/browser-login.sh")
-                    return False
-        log.error("❌ 未找到 customerClientId cookie，请重新登录期权账号")
-        return False
+        result = call_tool("check_login_status", {})
+        inner = result.get("result", {}).get("content", [])
+        text = inner[0].get("text", "") if inner else ""
+        if EXPECTED_ACCOUNT_NAME in text:
+            log.info("✅ 账号核实通过：%s", EXPECTED_ACCOUNT_NAME)
+            return True
+        else:
+            log.error("❌ 账号核实失败！期望账号 [%s]，check_login_status 返回: %s",
+                      EXPECTED_ACCOUNT_NAME, text[:200])
+            log.error("   → cookies.json 中的 web_session 可能属于其他账号，"
+                      "请重新登录期权账号：bash browser-login.sh")
+            return False
     except Exception as e:
-        log.error("❌ 账号核实异常: %s", e)
+        log.error("❌ check_login_status 调用失败: %s", e)
         return False
 
 
@@ -359,13 +358,15 @@ def main() -> None:
     log.info("=" * 60)
     log.info("定时发布任务启动 @ %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-    if not check_account_identity():
-        sys.exit(1)
-
+    # ① MCP 连通性优先检查（check_account_identity 依赖 MCP，顺序不可颠倒）
     if not check_mcp_alive():
-        log.error("MCP server 未运行，请先启动: ~/xiaohongshu-mcp/xiaohongshu-mcp-darwin-arm64")
+        log.error("MCP server 未运行，请先启动: bash %s/start_mcp.sh", SCRIPT_DIR)
         sys.exit(1)
     log.info("MCP server 连接正常")
+
+    # ② 通过 check_login_status 验证真实账号（不依赖不可靠的 customerClientId）
+    if not check_account_identity():
+        sys.exit(1)
 
     state = load_state()
     pending = get_pending_articles(state)
