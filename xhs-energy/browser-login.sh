@@ -26,6 +26,11 @@ fi
 cd "$DIR"
 "$LOGIN_BIN" -bin "$CHROME_WRAPPER"
 
+# 登录完成后，在已打开的 Chrome 窗口中导航到创作者中心（确认账号正确）
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    --user-data-dir="$HOME/.chrome-yuzhou" \
+    "https://creator.xiaohongshu.com/new/note-manager" &
+
 echo ""
 echo "✅ 登录完成，正在重启 MCP server (port 18061)..."
 bash "$DIR/start_mcp.sh"
