@@ -39,20 +39,19 @@ import pycookiecheat  # noqa: E402 (available after venv re-exec)
 SCRIPT_DIR   = Path("/Users/jarvis/xiaohongshu-bot/xhs-energy")
 COOKIES_FILE = SCRIPT_DIR / "cookies.json"
 
-# 宇宙能量账号（SS心灵疗愈所）使用 Chrome Profile 4（badstan）
-# 期权账号（wick123）使用 Chrome Profile 5 — 见 sync_cookies_from_chrome.py
-CHROME_BASE = Path("~/Library/Application Support/Google/Chrome").expanduser()
-YUZHOU_PROFILE = "Profile 4"  # badstan → SS心灵疗愈所
+# 宇宙能量账号（SS心灵疗愈所）使用独立 user-data-dir ~/.chrome-yuzhou
+# 与期权账号物理隔离，永不串号
+CHROME_USER_DATA_DIR = Path("~/.chrome-yuzhou").expanduser()
 
 # 如果 cookies.json 在这个秒数内刚刚被写入（browser-login 后），跳过同步
 SKIP_IF_COOKIES_NEWER_THAN = 12 * 3600  # 12 小时
 
 
 def _get_profile_db() -> Path:
-    """返回宇宙能量账号专用 Chrome profile 的 Cookies 数据库路径。"""
-    db = CHROME_BASE / YUZHOU_PROFILE / "Cookies"
+    """返回宇宙能量账号独立 Chrome user-data-dir 的 Cookies 数据库路径。"""
+    db = CHROME_USER_DATA_DIR / "Default" / "Cookies"
     if not db.exists():
-        raise FileNotFoundError(f"Chrome Profile 4 Cookies 数据库不存在: {db}")
+        raise FileNotFoundError(f"~/.chrome-yuzhou Cookies 不存在: {db}，请先运行 browser-login.sh 登录")
     return db
 
 
@@ -100,9 +99,9 @@ def _get_metadata(db_path: Path) -> dict:
 
 
 def get_xhs_cookies_from_chrome() -> list[dict]:
-    """从 Chrome Profile 4 读取宇宙能量账号的小红书 cookies。"""
+    """从 ~/.chrome-yuzhou 读取宇宙能量账号的小红书 cookies。"""
     db_path = _get_profile_db()
-    print(f"  使用 profile: {YUZHOU_PROFILE} ({db_path})  [宇宙能量 · SS心灵疗愈所]")
+    print(f"  使用独立目录: {CHROME_USER_DATA_DIR}  [宇宙能量 · SS心灵疗愈所]")
 
     decrypted = pycookiecheat.chrome_cookies(
         "https://www.xiaohongshu.com",

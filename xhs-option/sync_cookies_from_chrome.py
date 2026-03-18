@@ -39,39 +39,20 @@ SCRIPT_DIR   = Path("/Users/jarvis/xiaohongshu-bot/xhs-option")
 COOKIES_FILE = SCRIPT_DIR / "cookies.json"
 
 # Chrome profile 路径
-# Profile 4 = badstan → 宇宙能量账号（SS心灵疗愈所），由 sync_cookies_yuzhou.py 处理
-# Profile 5 = 期权账号（wick123），由本脚本处理
-CHROME_BASE = Path("~/Library/Application Support/Google/Chrome").expanduser()
-CANDIDATE_PROFILES = ["Profile 5", "Profile 6", "Default", "Profile 1", "Profile 2", "Profile 3"]
+# 期权账号（wick123）使用独立 user-data-dir ~/.chrome-option
+# 与宇宙能量账号物理隔离，永不串号
+CHROME_USER_DATA_DIR = Path("~/.chrome-option").expanduser()
 
 # 如果 cookies.json 在这个秒数内刚刚被写入（browser-login 后），跳过同步
 SKIP_IF_COOKIES_NEWER_THAN = 12 * 3600  # 12 小时
 
 
 def _find_best_profile() -> Path:
-    """找 XHS cookie 最多且最近访问过的 Chrome profile。"""
-    best, best_count = None, 0
-    for profile in CANDIDATE_PROFILES:
-        db = CHROME_BASE / profile / "Cookies"
-        if not db.exists():
-            continue
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-                tmp = f.name
-            shutil.copy2(str(db), tmp)
-            conn = sqlite3.connect(tmp)
-            n = conn.execute(
-                "SELECT count(*) FROM cookies WHERE host_key LIKE '%xiaohongshu%'"
-            ).fetchone()[0]
-            conn.close()
-            os.unlink(tmp)
-            if n > best_count:
-                best, best_count = db, n
-        except Exception:
-            pass
-    if best is None:
-        raise FileNotFoundError("未找到含小红书 cookie 的 Chrome profile")
-    return best
+    """返回期权账号独立 Chrome user-data-dir 的 Cookies 数据库路径。"""
+    db = CHROME_USER_DATA_DIR / "Default" / "Cookies"
+    if not db.exists():
+        raise FileNotFoundError(f"~/.chrome-option Cookies 不存在: {db}，请先运行 browser-login.sh 登录")
+    return db
 
 
 def _get_chrome_web_session_age(db_path: Path) -> float:
@@ -120,7 +101,7 @@ def _get_metadata(db_path: Path) -> dict:
 def get_xhs_cookies_from_chrome() -> list[dict]:
     """读取 Chrome 里所有小红书 cookies，返回与 cookies.json 格式一致的 list。"""
     db_path = _find_best_profile()
-    print(f"  使用 profile: {db_path.parent.name}  ({db_path})")
+    print(f"  使用独立目录: {CHROME_USER_DATA_DIR}  [期权 · wick123]")
 
     # pycookiecheat handles decryption correctly (v10 AES-CBC and newer AES-GCM)
     decrypted = pycookiecheat.chrome_cookies(
