@@ -22,5 +22,12 @@
 **/*.tar.gz
 # Backup files
 **/cookies.json.fresh_backup
+# Background images (large, local assets)
+**/backgrounds/*.jpg
+**/backgrounds/*.jpeg
+**/backgrounds/*.png
+# Backup shell scripts
+**/*.sh.bak
 # System files
+**/.DS_Store
 .DS_Store
