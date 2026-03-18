@@ -42,8 +42,8 @@
 
 | 账号 | 小红书昵称 | 内容方向 | 发布频率 | MCP 端口 | Chrome Profile |
 |---|---|---|---|---|---|
-| `xhs-option` | wick123 | 美股期权教育 | 2 篇/天（09:30 / 21:30） | 18060 | Profile 5 |
-| `xhs-energy` | SS心灵疗愈所 | 宇宙能量 / 显化 / 吸引力法则 | 3 篇/天（10:18 / 14:18 / 22:18） | 18061 | Profile 4 |
+| `xhs-option` | *(你的账号昵称)* | 美股期权教育 | 2 篇/天（09:30 / 21:30） | 18060 | *(独立 Profile)* |
+| `xhs-energy` | *(你的账号昵称)* | 宇宙能量 / 显化 / 吸引力法则 | 3 篇/天（10:18 / 14:18 / 22:18） | 18061 | *(独立 Profile)* |
 
 账号配置集中管理于根目录 [`accounts.json`](accounts.json)。
 
@@ -57,7 +57,7 @@ xiaohongshu-bot/
 ├── shared/
 │   ├── config.py                  # 路径推导中心（PROJECT_ROOT / get_account）
 │   ├── feedback.py                # 互动数据反馈脚本（两账号合一）
-│   └── com.jarvis.xhs-feedback.plist  # launchd plist（每天 02:00）
+│   └── com.<yourname>.xhs-feedback.plist  # launchd plist（每天 02:00）
 │
 ├── xhs-option/                    # 期权账号
 │   ├── publish.py                 # 定时发布主脚本
@@ -168,14 +168,14 @@ Claude Code / publish.py
         │
         │  JSON-RPC over HTTP
         ▼
-xhs-option MCP server (port 18060)  ──►  小红书账号 wick123
-xhs-energy MCP server (port 18061)  ──►  小红书账号 SS心灵疗愈所
+xhs-option MCP server (port 18060)  ──►  小红书账号（期权）
+xhs-energy MCP server (port 18061)  ──►  小红书账号（宇宙能量）
 ```
 
 **账号安全机制**：
 - MCP 工具名前缀强制绑定：`mcp__xhs-option__*` 只能调用 18060，不能误触 18061
 - `publish.py` 发布前校验 `cookies.json` 中的 `customerClientId`，不匹配则拒绝发布
-- Chrome Profile 物理隔离：期权用 Profile 5，宇宙能量用 Profile 4
+- Chrome Profile 物理隔离：每个账号绑定一个独立 Chrome Profile，互不干扰
 
 ---
 
@@ -301,7 +301,7 @@ log_file = PROJECT_ROOT / "xhs-option/logs/feedback.log"
 
 # get_account 返回账号配置，路径字段自动展开为绝对路径
 cfg = get_account("xhs-energy")
-vault_dir = Path(cfg["vault_pending"])   # /Users/.../Documents/宇宙能量/待发布
+vault_dir = Path(cfg["vault_pending"])   # → accounts.json 中配置的绝对路径
 ```
 
 路径解析规则：
@@ -337,7 +337,7 @@ vault_dir = Path(cfg["vault_pending"])   # /Users/.../Documents/宇宙能量/待
 | Track B 热帖扫描 | 每日 | `pipeline/track_b/scanner.py` |
 | Track B 翻译 | 每日 | `pipeline/track_b/translator.py` |
 | 周精选素材（curator） | 每周日 07:00 | `pipeline/track_a/curator.py` |
-| Cookie 同步（Chrome Profile 5） | 每日 03:00 | `sync_cookies_from_chrome.py` |
+| Cookie 同步（绑定 Chrome Profile） | 每日 03:00 | `sync_cookies_from_chrome.py` |
 
 ### 宇宙能量账号
 
@@ -345,7 +345,7 @@ vault_dir = Path(cfg["vault_pending"])   # /Users/.../Documents/宇宙能量/待
 |---|---|---|
 | MCP server 保活 | 开机启动 | `xhs-energy/start_mcp.sh` |
 | 发布（×3） | 10:18 / 14:18 / 22:18 | `xhs-energy/publish.py` |
-| Cookie 同步（Chrome Profile 4） | 每日 03:05 | `sync_cookies_yuzhou.py` |
+| Cookie 同步（绑定 Chrome Profile） | 每日 03:05 | `sync_cookies_yuzhou.py` |
 
 ### 共享任务
 
@@ -365,21 +365,21 @@ vault_dir = Path(cfg["vault_pending"])   # /Users/.../Documents/宇宙能量/待
 {
   "accounts": {
     "xhs-option": {
-      "display_name": "wick123",
+      "display_name": "<你的小红书昵称>",        // 用于登录校验
       "port": 18060,
-      "chrome_profile": "Profile 5",
-      "vault_pending": "xhs-option/vault/待发布",      // 相对路径 → 自动展开
+      "chrome_profile": "<Chrome Profile N>",   // 独立 Profile，勿与其他账号共用
+      "vault_pending": "xhs-option/vault/待发布",   // 相对路径 → 自动展开
       "vault_published": "xhs-option/vault/已发布",
       "publish_times": ["09:30", "21:30"],
       "max_chars": 950,
-      "expected_login_name": "wick123"
+      "expected_login_name": "<你的小红书昵称>"
     },
     "xhs-energy": {
-      "display_name": "SS心灵疗愈所",
+      "display_name": "<你的小红书昵称>",
       "port": 18061,
-      "chrome_profile": "Profile 4",
-      "vault_pending": "/Users/.../Documents/宇宙能量/待发布",  // 绝对路径 → 原样使用
-      "vault_published": "/Users/.../Documents/宇宙能量/已发布",
+      "chrome_profile": "<Chrome Profile M>",   // 另一个独立 Profile
+      "vault_pending": "/Users/<username>/Documents/<你的vault>/待发布",  // 绝对路径 → 原样使用
+      "vault_published": "/Users/<username>/Documents/<你的vault>/已发布",
       "publish_times": ["10:18", "14:18", "22:18"],
       "max_chars": 450
     }
@@ -425,7 +425,7 @@ vault_dir = Path(cfg["vault_pending"])   # /Users/.../Documents/宇宙能量/待
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/bradstan/xiaohongshu-bot.git
+git clone https://github.com/<your-username>/xiaohongshu-bot.git
 cd xiaohongshu-bot
 
 # 2. 修改 vault 路径（energy 账号 vault 在 repo 外）
@@ -439,9 +439,9 @@ python3 -m venv xhs-energy/venv && xhs-energy/venv/bin/pip install pillow
 # 4. 配置 MCP server（~/.claude.json）
 # 参考上方「MCP server 配置」章节
 
-# 5. 登录小红书账号
-cd xhs-option && bash browser-login.sh      # 扫码两次登录 wick123
-cd xhs-energy && bash browser-login.sh      # 扫码两次登录 SS心灵疗愈所
+# 5. 登录小红书账号（各账号独立扫码，需扫两次）
+cd xhs-option && bash browser-login.sh
+cd xhs-energy && bash browser-login.sh
 
 # 6. 启动 MCP server
 bash xhs-option/start_mcp.sh
@@ -450,8 +450,8 @@ bash xhs-energy/start_mcp.sh
 # 7. 安装 launchd 定时任务（以发布任务为例）
 cp xhs-option/launchd/*.plist ~/Library/LaunchAgents/
 cp xhs-energy/launchd/*.plist ~/Library/LaunchAgents/
-cp shared/com.jarvis.xhs-feedback.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.jarvis.xhs-publish-morning.plist
+cp shared/com.<yourname>.xhs-feedback.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.<yourname>.xhs-publish-morning.plist
 # （对所有 plist 重复此操作）
 ```
 
@@ -494,19 +494,21 @@ nc -z 127.0.0.1 18061 && echo "xhs-energy OK" || echo "xhs-energy DOWN"
 ### 登录流程
 
 ```bash
-# 期权账号（Chrome Profile 5）
+# 期权账号（绑定独立 Chrome Profile）
 cd xhs-option
 ./xiaohongshu-login-darwin-arm64 -bin "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # → 浏览器打开，扫码两次 → 完成后运行：
 bash start_mcp.sh
 ```
 
+> 每个账号必须绑定**不同的 Chrome Profile**，在各自 sync_cookies 脚本中指定对应的 Profile 路径。
+
 ### Cookie 自动同步
 
 登录后 Cookie 会随时间过期。每天 03:00 launchd 自动同步 Chrome 中的最新 session：
 
-- **期权**：`sync_cookies_from_chrome.py`（Profile 5）
-- **宇宙能量**：`sync_cookies_yuzhou.py`（Profile 4）
+- **期权**：`sync_cookies_from_chrome.py`（读取期权账号对应的 Chrome Profile）
+- **宇宙能量**：`sync_cookies_yuzhou.py`（读取宇宙能量账号对应的 Chrome Profile）
 
 同步逻辑：比较 `web_session` token 新鲜度，仅在 Chrome 有更新时才同步，避免覆盖刚刚手动登录的 cookies。
 
@@ -528,7 +530,7 @@ MCP 超时 → nc -z 127.0.0.1 18060 → bash start_mcp.sh
 位置：`xhs-option/skills/xhs-option/SKILL.md`
 
 功能：完整的期权账号发布工作流——
-1. 验证登录（`mcp__xhs-option__check_login_status`，必须返回「wick123」）
+1. 验证登录（`mcp__xhs-option__check_login_status`，必须返回期权账号昵称）
 2. 写文章（300-950 字，朋友聊天风格，遵循禁用词清单）
 3. 生成封面（`make_cover.py` 或 `qiaomu-mondo-poster-design`）
 4. 呈现草稿等待用户审核
