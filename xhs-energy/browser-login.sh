@@ -23,8 +23,10 @@ if [ -f "$DIR/cookies.json" ]; then
 fi
 
 # 启动浏览器登录（前台运行，完成后自动退出）
+# -rod StartURL：直接打开创作者中心，免去跳转，方便确认登录是否成功
 cd "$DIR"
-"$LOGIN_BIN" -bin "$CHROME_WRAPPER"
+"$LOGIN_BIN" -bin "$CHROME_WRAPPER" \
+    -rod "StartURL=https://creator.xiaohongshu.com/new/note-manager?source=official"
 
 echo ""
 echo "✅ 登录完成，正在重启 MCP server (port 18061)..."
