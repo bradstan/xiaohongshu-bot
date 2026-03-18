@@ -25,34 +25,38 @@ from typing import Optional
 if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
     os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/sbin:" + os.environ.get("PATH", "")
 
-# ─── 账号配置（轻量账号体系的雏形）─────────────────────────────────────────────
+# ─── 路径推导（无硬编码用户名）─────────────────────────────────────────────────
+_SHARED_DIR  = Path(__file__).resolve().parent     # shared/
+PROJECT_ROOT = _SHARED_DIR.parent                   # monorepo 根目录
+
+# ─── 账号配置（从 PROJECT_ROOT 推导，无硬编码路径）───────────────────────────
 ACCOUNTS = [
     {
         "id":           "xhs-option",
         "display_name": "wick123",
         "mcp_url":      "http://localhost:18060/mcp",
-        "start_mcp_sh": "/Users/jarvis/xiaohongshu-bot/xhs-option/start_mcp.sh",
-        "state_file":   "/Users/jarvis/xiaohongshu-bot/xhs-option/published.json",
-        "topics_file":  "/Users/jarvis/xiaohongshu-bot/xhs-option/topics.json",
-        "log_file":     "/Users/jarvis/xiaohongshu-bot/xhs-option/logs/feedback.log",
-        "theme_weights_file": "/Users/jarvis/xiaohongshu-bot/xhs-option/state/theme_weights.json",
-        "llm_dir":      "/Users/jarvis/xiaohongshu-bot/xhs-option",  # llm.py 所在目录
+        "start_mcp_sh": str(PROJECT_ROOT / "xhs-option/start_mcp.sh"),
+        "state_file":   str(PROJECT_ROOT / "xhs-option/published.json"),
+        "topics_file":  str(PROJECT_ROOT / "xhs-option/topics.json"),
+        "log_file":     str(PROJECT_ROOT / "xhs-option/logs/feedback.log"),
+        "theme_weights_file": str(PROJECT_ROOT / "xhs-option/state/theme_weights.json"),
+        "llm_dir":      str(PROJECT_ROOT / "xhs-option"),  # llm.py 所在目录
     },
     {
         "id":           "xhs-energy",
         "display_name": "SS心灵疗愈所",
         "mcp_url":      "http://localhost:18061/mcp",
-        "start_mcp_sh": "/Users/jarvis/xiaohongshu-bot/xhs-energy/start_mcp.sh",
-        "state_file":   "/Users/jarvis/xiaohongshu-bot/xhs-energy/published.json",
-        "topics_file":  "/Users/jarvis/xiaohongshu-bot/xhs-energy/topics.json",
-        "log_file":     "/Users/jarvis/xiaohongshu-bot/xhs-energy/logs/feedback.log",
-        "theme_weights_file": "/Users/jarvis/xiaohongshu-bot/xhs-energy/state/theme_weights.json",
-        "llm_dir":      "/Users/jarvis/xiaohongshu-bot/xhs-option",  # 共用同一个 llm.py
+        "start_mcp_sh": str(PROJECT_ROOT / "xhs-energy/start_mcp.sh"),
+        "state_file":   str(PROJECT_ROOT / "xhs-energy/published.json"),
+        "topics_file":  str(PROJECT_ROOT / "xhs-energy/topics.json"),
+        "log_file":     str(PROJECT_ROOT / "xhs-energy/logs/feedback.log"),
+        "theme_weights_file": str(PROJECT_ROOT / "xhs-energy/state/theme_weights.json"),
+        "llm_dir":      str(PROJECT_ROOT / "xhs-option"),  # 共用同一个 llm.py
     },
 ]
 
 # perf.json 输出路径（两账号共享，writer.py 读取时按 account_id 取对应 key）
-PERF_FILE = Path("/Users/jarvis/xiaohongshu-bot/shared/perf.json")
+PERF_FILE = _SHARED_DIR / "perf.json"
 
 # 时间节点：(分钟数, 标签)
 CHECKPOINTS = [

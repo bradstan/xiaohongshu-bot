@@ -18,12 +18,13 @@ import re
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-COVER_DIR       = Path("/Users/jarvis/xiaohongshu-bot/xhs-energy/covers")
-BACKGROUNDS_DIR = Path("/Users/jarvis/xiaohongshu-bot/xhs-energy/backgrounds")
+_SCRIPT_DIR     = Path(__file__).parent
+COVER_DIR       = _SCRIPT_DIR / "covers"
+BACKGROUNDS_DIR = _SCRIPT_DIR / "backgrounds"
 COVER_DIR.mkdir(exist_ok=True)
 
 # 思源宋体（Adobe 出品，线条对比强，专业衬线）
-FONT_TITLE = "/Users/jarvis/xiaohongshu-bot/xhs-energy/fonts/SourceHanSerifCN-Regular.ttf"
+FONT_TITLE = str(_SCRIPT_DIR / "fonts/SourceHanSerifCN-Regular.ttf")
 FONT_BRAND = "/System/Library/Fonts/STHeiti Light.ttc"
 
 W, H = 1080, 1440
@@ -172,72 +173,12 @@ def _render_yuzhou(title: str, content: str, index: int) -> Image.Image:
     lh         = _line_h(title_font, lines[0] if lines else "测") + 20
     total_h    = lh * len(lines)
 
-    # ── 心形参数 ──────────────────────────────────────────────────────────────
-    # 参数方程：x = 16sin³t, y = -(13cost - 5cos2t - 2cos3t - cos4t)
-    # y 范围约 -13 ~ +17，视觉重心偏上约 4 单位 → cy 补偿
-    heart_w = 720                 # 心形宽度（px）
-    scale   = heart_w / 32.0
-    cx      = W // 2
-    cy      = H // 2 - int(2 * scale)   # 让心形视觉中心对齐图片中心
-
-    pts = []
-    for i in range(720):
-        t  = 2 * math.pi * i / 720
-        hx = 16 * math.sin(t) ** 3
-        hy = -(13 * math.cos(t) - 5 * math.cos(2*t)
-               - 2 * math.cos(3*t) - math.cos(4*t))
-        pts.append((int(cx + hx * scale), int(cy + hy * scale)))
-
-    # ── 水彩彩铅心形 ─────────────────────────────────────────────────────────
-    # 1. 心形 mask（软边）
-    heart_mask = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(heart_mask).polygon(pts, fill=255)
-    heart_mask = heart_mask.filter(ImageFilter.GaussianBlur(radius=8))
-
-    # 2. 笔触层：底色 + 大量随机短线模拟彩铅笔触
-    base_pink = (232, 178, 172)          # 粉玫瑰底色
-    rng_s     = random.Random(index * 17 + 42)
-
-    strokes = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    s_draw  = ImageDraw.Draw(strokes)
-
-    # 心形包围盒（含 padding）
-    y_min = int(cy - scale * 13) - 20
-    y_max = int(cy + scale * 17) + 20
-    x_min = int(cx - scale * 16) - 20
-    x_max = int(cx + scale * 16) + 20
-
-    # 先铺半透明底色
-    s_draw.rectangle([x_min, y_min, x_max, y_max],
-                     fill=(*base_pink, 110))
-
-    # 大量短笔触（近似水平，轻微随机角度）
-    for _ in range(1600):
-        sx     = rng_s.randint(x_min, x_max)
-        sy     = rng_s.randint(y_min, y_max)
-        length = rng_s.randint(16, 70)
-        angle  = rng_s.uniform(-0.30, 0.30)    # 轻微倾斜
-        ex     = sx + int(length * math.cos(angle))
-        ey     = sy + int(length * math.sin(angle))
-        # 在粉玫瑰色调内随机游走
-        r_ = max(155, min(255, base_pink[0] + rng_s.randint(-35, 20)))
-        g_ = max(110, min(220, base_pink[1] + rng_s.randint(-30, 20)))
-        b_ = max(110, min(215, base_pink[2] + rng_s.randint(-25, 25)))
-        a_ = rng_s.randint(30, 115)
-        w_ = rng_s.randint(1, 4)
-        s_draw.line([(sx, sy), (ex, ey)], fill=(r_, g_, b_, a_), width=w_)
-
-    # 3. 按心形 mask 裁切笔触层，再叠到背景
-    transparent  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    heart_clipped = Image.composite(strokes, transparent, heart_mask)
-
-    img = Image.alpha_composite(img.convert("RGBA"), heart_clipped).convert("RGB")
-
-    # ── 文字（深玫瑰色 + 白色撞色描边，垂直居中于心形视觉中心）─────────
+    # ── 文字（深玫瑰色 + 白色撞色描边，图片垂直居中）──────────────────────
     text_color   = (105, 50, 55)       # 深玫瑰/栗色
     stroke_color = (255, 255, 255)     # 白色撞色描边
     stroke_w     = 20
     draw   = ImageDraw.Draw(img)
+    cy     = H // 2
     text_y = cy - total_h // 2
 
     for line in lines:

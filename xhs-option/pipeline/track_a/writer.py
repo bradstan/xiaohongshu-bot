@@ -17,8 +17,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-SCRIPT_DIR  = Path("/Users/jarvis/xiaohongshu-mcp")
-REVIEW_DIR  = Path("/Users/jarvis/xiaohongshu-mcp/vault/待发布")
+# pipeline/track_a/ → pipeline/ → xhs-option/
+SCRIPT_DIR  = Path(__file__).resolve().parent.parent.parent
+REVIEW_DIR  = SCRIPT_DIR / "vault/待审核"
 LOG_FILE    = SCRIPT_DIR / "logs" / "writer_a.log"
 
 sys.path.insert(0, str(SCRIPT_DIR))

@@ -9,6 +9,7 @@ Token 来源优先级：
 
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -16,7 +17,11 @@ from typing import Optional
 log = logging.getLogger("llm")
 
 _OAUTH_TOKEN_FILE = Path.home() / ".config" / "anthropic" / "oauth_token"
-_CLAUDE_BIN = "/Users/jarvis/.npm-global/bin/claude"
+# 优先从 PATH 查找 claude，回退到常见安装位置（不硬编码用户名）
+_CLAUDE_BIN = (
+    shutil.which("claude") or
+    str(Path.home() / ".npm-global/bin/claude")
+)
 
 
 def _ensure_oauth_token() -> None:

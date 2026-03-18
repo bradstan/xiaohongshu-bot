@@ -14,7 +14,7 @@ import textwrap
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-COVER_DIR = Path("/Users/jarvis/xiaohongshu-bot/xhs-option/covers")
+COVER_DIR = Path(__file__).parent / "covers"
 COVER_DIR.mkdir(exist_ok=True)
 
 FONT_BOLD  = "/System/Library/Fonts/STHeiti Medium.ttc"
@@ -357,7 +357,7 @@ def _render_ai_tools(title: str, content: str, index: int) -> Image.Image:
 
 
 # PA 系列美元素材路径（抠图后的揉皱百元钞票）
-PA_DOLLAR_IMG = Path("/Users/jarvis/Downloads/333_cutout.png")
+PA_DOLLAR_IMG = Path.home() / "Downloads/333_cutout.png"
 
 def _draw_rounded_rect(draw, xy, radius, fill):
     """圆角矩形（兼容旧版 PIL）"""
@@ -484,6 +484,131 @@ def _render_pa(title: str, content: str, index: int) -> Image.Image:
     return img
 
 
+# ─── 模板 D：broad_finance 泛财经风（白底斜纹 + 美元撕纸图）─────────────────
+BROAD_FINANCE_DOLLAR = Path.home() / "Downloads/美元.jpg"
+BROAD_FINANCE_GREEN  = (22, 88, 44)
+
+
+def _split_title_bf(title: str) -> list[str]:
+    parts = re.split(r'(?<=[？。！，；：—])', title)
+    parts = [p for p in parts if p]
+    if len(parts) >= 2:
+        return parts
+    mid = len(title) // 2
+    return [title[:mid], title[mid:]]
+
+
+def _render_broad_finance(title: str, content: str = "", index: int = 0) -> Image.Image:
+    GREEN = BROAD_FINANCE_GREEN
+    img   = Image.new("RGB", (W, H), (255, 255, 255))
+    draw  = ImageDraw.Draw(img)
+
+    # 斜线底纹（稍深灰色 45°细线）
+    for offset in range(-H, W + H, 28):
+        draw.line([(offset, 0), (offset + H, H)], fill=(200, 200, 200), width=1)
+
+    # 底部美元图（缩小 20%，向左偏移 15px）
+    IMG_H = 560
+    IMG_Y = H - IMG_H
+    if BROAD_FINANCE_DOLLAR.exists():
+        dollar = Image.open(BROAD_FINANCE_DOLLAR).convert("RGB")
+        dw, dh = dollar.size
+        # 缩小到 80% 宽度
+        new_w = int(W * 0.8)
+        new_h = int(dh * new_w / dw)
+        resized = dollar.resize((new_w, new_h), Image.LANCZOS)
+        if new_h > IMG_H:
+            crop_top = (new_h - IMG_H) // 2
+            cropped = resized.crop((0, crop_top, new_w, crop_top + IMG_H))
+            paste_h = IMG_H
+        else:
+            cropped = resized
+            paste_h = new_h
+            IMG_Y = H - paste_h
+        # 水平居中再左移 15px
+        paste_x = (W - new_w) // 2 - 15
+        img.paste(cropped, (paste_x, IMG_Y))
+        # 渐变遮罩（覆盖图片上边缘）
+        gradient = Image.new("L", (W, 90), 0)
+        for i in range(90):
+            ImageDraw.Draw(gradient).line([(0, i), (W, i)], fill=int(255 * (1 - i / 90)))
+        img.paste(Image.new("RGB", (W, 90), (255, 255, 255)), (0, IMG_Y), gradient)
+
+    draw = ImageDraw.Draw(img)
+
+    # 四边绿色边框
+    BW = 12
+    draw.rectangle([(0, 0),      (W, BW)],  fill=GREEN)
+    draw.rectangle([(0, H - BW), (W, H)],   fill=GREEN)
+    draw.rectangle([(0, 0),      (BW, H)],  fill=GREEN)
+    draw.rectangle([(W - BW, 0), (W, H)],   fill=GREEN)
+
+    # 品牌名（左上）
+    f_brand = _font(FONT_BOLD, 36)
+    draw.text((60, 55), "美股研习社", font=f_brand, fill=GREEN, anchor="lm")
+    bw = int(draw.textlength("美股研习社", font=f_brand))
+    draw.rectangle([(60, 74), (60 + bw, 77)], fill=GREEN)
+
+    # 主标题（断句两行，自适应字号，居中）
+    t_lines = _split_title_bf(title)
+    MAX_TW  = W - 100
+    f_title = _font(FONT_BOLD, 64)
+    for size in range(108, 60, -4):
+        f = _font(FONT_BOLD, size)
+        if all(draw.textlength(l, font=f) <= MAX_TW for l in t_lines):
+            f_title = f
+            break
+    bbox   = f_title.getbbox("国")
+    char_h = bbox[3] - bbox[1]
+    t_gap  = int(char_h * 0.35)
+    title_h = len(t_lines) * char_h + (len(t_lines) - 1) * t_gap
+
+    # Bullet points：优先取 ## 标题，按宽度截断，最多3条
+    def _bf_points(text: str) -> list[str]:
+        pts = []
+        for m in re.findall(r'^#{2,3}\s+(.+)$', text, re.MULTILINE):
+            m = re.sub(r'^\d+[\.、]\s*', '', m).strip()
+            m = re.sub(r'^[❌✅⚠️💡🔥①②③④⑤]+\s*', '', m).strip()
+            if len(m) >= 4:
+                pts.append(m)
+            if len(pts) >= 3:
+                break
+        if not pts:
+            pts = extract_key_points(text)
+        return pts
+    points  = _bf_points(content) if content else []
+    f_pt    = _font(FONT_LIGHT, 42)
+    pt_lh   = f_pt.getbbox("国")[3] - f_pt.getbbox("国")[1]
+    pt_gap  = 18
+    bullets_h = len(points) * (pt_lh + pt_gap) + (24 if points else 0)  # 24 = title→bullets gap
+
+    # 整体内容块垂直居中（品牌区下方 100px 到图片上方 80px）
+    content_h = title_h + bullets_h
+    y_top     = 100
+    y_bot     = IMG_Y - 80
+    y_start   = (y_top + y_bot - content_h) // 2
+
+    # 绘制标题
+    for i, line in enumerate(t_lines):
+        y = y_start + i * (char_h + t_gap)
+        draw.text((W // 2, y + char_h // 2), line,
+                  font=f_title, fill=(15, 15, 15), anchor="mm")
+
+    # 绘制 bullet points
+    if points:
+        by = y_start + title_h + 24
+        for pt in points:
+            # 截断过长文字使其不超出边框
+            max_pt_w = W - 130 - 12  # 12 = 右边框
+            while len(pt) > 2 and draw.textlength(pt, font=f_pt) > max_pt_w:
+                pt = pt[:-1]
+            draw.text((80, by), "·", font=f_pt, fill=GREEN)
+            draw.text((114, by), pt, font=f_pt, fill=(40, 40, 40))
+            by += pt_lh + pt_gap
+
+    return img
+
+
 # ─── 对外接口 ─────────────────────────────────────────────────────────────────
 def generate_cover(title: str, content: str = "",
                    index: int = 0, category: str = "options") -> str:
@@ -506,6 +631,8 @@ def generate_cover(title: str, content: str = "",
         img = _render_ai_tools(title, content, index)
     elif category == "pa":
         img = _render_pa(title, content, index)
+    elif category == "broad_finance":
+        img = _render_broad_finance(title, content, index)
     else:
         img = _render_options(title, content, index)
 

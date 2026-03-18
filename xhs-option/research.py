@@ -23,13 +23,13 @@ if "/opt/homebrew/bin" not in os.environ.get("PATH", ""):
     os.environ["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", "")
 
 # ─── 配置 ─────────────────────────────────────────────────────────────────────
-SCRIPT_DIR    = Path("/Users/jarvis/xiaohongshu-bot/xhs-option")
+SCRIPT_DIR    = Path(__file__).parent
 TOPICS_FILE   = SCRIPT_DIR / "topics.json"
 STATE_FILE    = SCRIPT_DIR / "published.json"
 LOG_FILE      = SCRIPT_DIR / "research.log"
-PUBLISH_DIR        = Path("/Users/jarvis/xiaohongshu-bot/xhs-option/vault/待发布")
-PUBLISHED_DIR      = Path("/Users/jarvis/xiaohongshu-bot/xhs-option/vault/已发布")
-REVIEW_DIR         = Path("/Users/jarvis/xiaohongshu-bot/xhs-option/vault/待审核")
+PUBLISH_DIR        = SCRIPT_DIR / "vault/待发布"
+PUBLISHED_DIR      = SCRIPT_DIR / "vault/已发布"
+REVIEW_DIR         = SCRIPT_DIR / "vault/待审核"
 CONTENT_PLAN_FILE  = SCRIPT_DIR / "state" / "content_plan.json"
 THEME_WEIGHTS_FILE = SCRIPT_DIR / "state" / "theme_weights.json"
 

@@ -4,7 +4,6 @@
 - 从 Obsidian Vault 读取 Markdown 文章
 - 追踪已发布状态（published.json）
 - 调用 xiaohongshu-mcp HTTP API 发布
-- 发布后搜索 feed_id 供后续互动数据拉取
 """
 
 import json
@@ -21,11 +20,10 @@ import urllib.error
 # 封面图生成
 sys.path.insert(0, str(Path(__file__).parent))
 from make_cover import generate_cover
-from mark_published import mark_file
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-SCRIPT_DIR = Path("/Users/jarvis/xiaohongshu-bot/xhs-option")
-VAULT_DIR  = Path("/Users/jarvis/xiaohongshu-bot/xhs-option/vault/待发布")
+SCRIPT_DIR = Path(__file__).parent
+VAULT_DIR  = SCRIPT_DIR / "vault/待发布"
 STATE_FILE = SCRIPT_DIR / "published.json"
 TOPICS_FILE = SCRIPT_DIR / "topics.json"
 LOG_FILE   = SCRIPT_DIR / "publish.log"
@@ -62,9 +60,6 @@ def _migrate_entry(entry) -> dict:
             "file": entry,
             "title": "",
             "published_at": "",
-            "feed_id": "",
-            "xsec_token": "",
-            "checkpoints": {},
         }
     return entry
 
@@ -153,8 +148,6 @@ def parse_article(path: Path) -> dict:
     content_start = (h1_line_idx + 1) if h1_line_idx != -1 else body_start
     body_lines = []
     for line in lines[content_start:]:
-        if line.strip() == "## 📊 发布数据追踪":
-            break
         body_lines.append(line)
 
     content = "\n".join(body_lines).strip()
@@ -313,74 +306,6 @@ def check_mcp_alive() -> bool:
         return False
 
 
-# ─── 发布后搜索 feed_id ────────────────────────────────────────────────────────
-MY_USER_ID = "54808b57d6e4a9616b300900"
-
-
-def _parse_feeds_response(result: dict) -> list:
-    """从 MCP 响应中解析 feeds 列表"""
-    text = ""
-    inner = result.get("result", {}).get("content", [])
-    if inner:
-        text = inner[0].get("text", "")
-    try:
-        feeds_data = json.loads(text)
-    except Exception:
-        feeds_data = result.get("result", {})
-    if isinstance(feeds_data, dict):
-        return feeds_data.get("feeds", []) or feeds_data.get("items", [])
-    elif isinstance(feeds_data, list):
-        return feeds_data
-    return []
-
-
-def _match_feed(feeds: list, title: str) -> tuple[str, str]:
-    """从 feeds 列表中匹配标题，优先匹配自己的笔记"""
-    clean_title = re.sub(r'\s+', '', title)
-    # 第一轮：标题匹配 + 是自己发的
-    for feed in feeds:
-        nc = feed.get("noteCard", {})
-        dt = re.sub(r'\s+', '', nc.get("displayTitle", ""))
-        uid = nc.get("user", {}).get("userId", "")
-        if uid == MY_USER_ID and (dt == clean_title or clean_title in dt or dt in clean_title):
-            fid = feed.get("id", "")
-            tok = feed.get("xsecToken", "")
-            if fid:
-                log.info("找到 feed_id: %s (自己的笔记)", fid)
-                return fid, tok
-    # 第二轮：标题模糊匹配（不限用户）
-    for feed in feeds:
-        nc = feed.get("noteCard", {})
-        dt = re.sub(r'\s+', '', nc.get("displayTitle", ""))
-        if clean_title in dt or dt in clean_title:
-            fid = feed.get("id", "")
-            tok = feed.get("xsecToken", "")
-            if fid:
-                log.info("找到 feed_id（模糊匹配）: %s", fid)
-                return fid, tok
-    return "", ""
-
-
-def find_feed_id(title: str) -> tuple[str, str]:
-    """
-    发布成功后搜索自己的文章，获取 feed_id 和 xsec_token。
-    策略：用标题前 10 字搜索（短关键词更快），匹配时优先过滤自己的 userId。
-    返回 (feed_id, xsec_token)，失败返回 ("", "")
-    """
-    keyword = title[:10]
-    try:
-        result = call_tool("search_feeds", {"keyword": keyword})
-        feeds = _parse_feeds_response(result)
-        fid, tok = _match_feed(feeds, title)
-        if fid:
-            return fid, tok
-        log.warning("未找到匹配的 feed，关键词: %s", keyword)
-        return "", ""
-    except Exception as e:
-        log.warning("搜索 feed_id 失败: %s", e)
-        return "", ""
-
-
 # ─── 发布文章 ─────────────────────────────────────────────────────────────────
 def publish_article(article: dict, index: int = 0) -> bool:
     try:
@@ -473,36 +398,26 @@ def main() -> None:
     success = publish_article(article, index=published_count)
 
     if success:
-        # 等待让小红书索引生效后再搜索 feed_id
-        import time
-        time.sleep(15)
-        feed_id, xsec_token = find_feed_id(article["title"])
-
         entry = {
             "file": str(target),
             "title": article["title"],
             "theme_id": article.get("theme_id") or "unknown",
             "category": article.get("category") or "",
             "published_at": datetime.now().isoformat(timespec="seconds"),
-            "feed_id": feed_id,
-            "xsec_token": xsec_token,
-            "checkpoints": {},
         }
         state["published"].append(entry)
         save_state(state)
 
         # 移动文件到「已发布」文件夹
-        published_dir = Path("/Users/jarvis/xiaohongshu-bot/xhs-option/vault/已发布")
+        published_dir = SCRIPT_DIR / "vault/已发布"
         published_dir.mkdir(parents=True, exist_ok=True)
         dest = published_dir / target.name
         target.rename(dest)
-        marked_dest = mark_file(str(dest))
-        entry["file"] = marked_dest
+        entry["file"] = str(dest)
         state["published"][-1] = entry
         save_state(state)
-        log.info("✓ 文件已移动并重命名: %s", Path(marked_dest).name)
+        log.info("✓ 文件已移动: %s", dest.name)
 
-        log.info("  feed_id: %s", feed_id or "（未找到，稍后 feedback.py 可重试）")
         log.info("已发布 %d 篇，剩余 %d 篇", len(state["published"]), len(pending) - 1)
     else:
         log.error("✗ 发布失败: %s", target.name)

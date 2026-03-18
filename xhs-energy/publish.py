@@ -24,11 +24,14 @@ from make_cover import generate_cover
 from mark_published import mark_file
 
 # ─── 配置 ────────────────────────────────────────────────────────────────────
-SCRIPT_DIR = Path("/Users/jarvis/xiaohongshu-bot/xhs-energy")
-VAULT_DIR  = Path("/Users/jarvis/Documents/宇宙能量/待发布")
-STATE_FILE = SCRIPT_DIR / "published.json"
-TOPICS_FILE = SCRIPT_DIR / "topics.json"
-LOG_FILE   = SCRIPT_DIR / "publish.log"
+SCRIPT_DIR = Path(__file__).parent
+# vault 目录从 accounts.json 读取（支持 vault 在 repo 外的情况）
+_cfg = json.loads((SCRIPT_DIR.parent / "accounts.json").read_text(encoding="utf-8"))["accounts"]["xhs-energy"]
+VAULT_DIR           = Path(_cfg["vault_pending"])
+VAULT_PUBLISHED_DIR = Path(_cfg["vault_published"])
+STATE_FILE   = SCRIPT_DIR / "published.json"
+TOPICS_FILE  = SCRIPT_DIR / "topics.json"
+LOG_FILE     = SCRIPT_DIR / "publish.log"
 COOKIES_FILE = SCRIPT_DIR / "cookies.json"
 MCP_URL    = "http://localhost:18061/mcp"
 MCP_ACCEPT = "application/json, text/event-stream"
@@ -498,7 +501,7 @@ def main() -> None:
         save_state(state)
 
         # 移动文件到「已发布」文件夹
-        published_dir = Path("/Users/jarvis/Documents/宇宙能量/已发布")
+        published_dir = VAULT_PUBLISHED_DIR
         published_dir.mkdir(parents=True, exist_ok=True)
         dest = published_dir / target.name
         target.rename(dest)

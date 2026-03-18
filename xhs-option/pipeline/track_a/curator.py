@@ -26,13 +26,19 @@ from pathlib import Path
 from typing import List, Optional
 
 # ─── 路径 ─────────────────────────────────────────────────────────────────────
-SCRIPT_DIR   = Path("/Users/jarvis/xiaohongshu-mcp")
+import shutil as _shutil
+# pipeline/track_a/ → pipeline/ → xhs-option/
+SCRIPT_DIR   = Path(__file__).resolve().parent.parent.parent
 CURATED_DIR  = SCRIPT_DIR / "state" / "curated"
 LOG_FILE     = SCRIPT_DIR / "logs" / "curator_a.log"
-AGENT_REACH  = "/Users/jarvis/.local/bin/agent-reach"
+# 优先从 PATH 查找 agent-reach，回退到常见安装位置
+AGENT_REACH  = (
+    _shutil.which("agent-reach") or
+    str(Path.home() / ".local/bin/agent-reach")
+)
 AR_ENV = {
     **os.environ,
-    "PATH": "/opt/homebrew/bin:/usr/local/bin:/Users/jarvis/.local/bin:" + os.environ.get("PATH", ""),
+    "PATH": "/opt/homebrew/bin:/usr/local/bin:" + str(Path.home() / ".local/bin") + ":" + os.environ.get("PATH", ""),
 }
 
 sys.path.insert(0, str(SCRIPT_DIR))
