@@ -31,6 +31,4 @@ echo "✅ 登录完成，正在重启 MCP server (port 18061)..."
 bash "$DIR/start_mcp.sh"
 
 echo "✅ MCP server 已重启，登录流程完成！"
-echo ""
-echo "🔍 打开登录页（强制退出旧 session），请重新扫码登录【SS心灵疗愈所】..."
-open "https://creator.xiaohongshu.com/login?source=&redirectReason=401&lastUrl=%252Fnew%252Fhome"
+echo "   → 在已打开的浏览器中确认右上角显示【SS心灵疗愈所】即可"
