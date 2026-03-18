@@ -1,0 +1,45 @@
+{
+  "accounts": {
+    "xhs-option": {
+      "display_name": "wick123",
+      "mcp_name": "xhs-option",
+      "port": 18060,
+      "chrome_profile": "Profile 5",
+      "vault_pending": "/Users/jarvis/xiaohongshu-bot/xhs-option/vault/待发布",
+      "vault_published": "/Users/jarvis/xiaohongshu-bot/xhs-option/vault/已发布",
+      "publish_py": "/Users/jarvis/xiaohongshu-bot/xhs-option/publish.py",
+      "python_bin": "/usr/bin/python3",
+      "publish_times": ["09:30", "21:30"],
+      "content_style": "professional-finance",
+      "max_chars": 950,
+      "expected_login_name": "wick123",
+      "cover_category": "options",
+      "tags_required": ["期权教育", "美股期权"],
+      "state_file": "/Users/jarvis/xiaohongshu-bot/xhs-option/published.json",
+      "theme_weights_file": "/Users/jarvis/xiaohongshu-bot/xhs-option/state/theme_weights.json"
+    },
+    "xhs-energy": {
+      "display_name": "SS心灵疗愈所",
+      "mcp_name": "xhs-energy",
+      "port": 18061,
+      "chrome_profile": "Profile 4",
+      "vault_pending": "/Users/jarvis/Documents/宇宙能量/待发布",
+      "vault_published": "/Users/jarvis/Documents/宇宙能量/已发布",
+      "publish_py": "/Users/jarvis/xiaohongshu-bot/xhs-energy/publish.py",
+      "python_bin": "/Users/jarvis/xiaohongshu-bot/xhs-energy/venv/bin/python3",
+      "publish_times": ["10:18", "14:18", "22:18"],
+      "content_style": "spiritual-feminine",
+      "max_chars": 450,
+      "expected_login_name": "SS心灵疗愈所",
+      "cover_category": "yuzhou",
+      "tags_required": ["宇宙能量", "显化", "吸引力法则"],
+      "state_file": "/Users/jarvis/xiaohongshu-bot/xhs-energy/published.json",
+      "theme_weights_file": "/Users/jarvis/xiaohongshu-bot/xhs-energy/state/theme_weights.json"
+    }
+  },
+  "shared": {
+    "feedback_py": "/Users/jarvis/xiaohongshu-bot/shared/feedback.py",
+    "perf_json": "/Users/jarvis/xiaohongshu-bot/shared/perf.json",
+    "monorepo_root": "/Users/jarvis/xiaohongshu-bot"
+  }
+}

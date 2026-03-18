@@ -66,7 +66,7 @@ def analyze_past_performance(state: dict) -> dict:
         cp = entry.get("checkpoints", {})
         # 取最新时间点数据
         latest = {}
-        for label in ["24小时", "6小时", "3小时", "1小时", "30分钟"]:
+        for label in ["14天", "7天", "3天", "24小时", "6小时", "3小时", "1小时", "30分钟"]:
             if label in cp:
                 latest = cp[label]
                 break
